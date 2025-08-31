@@ -1,0 +1,34 @@
+# PyWebView桌面版依赖
+pywebview>=6.0
+flask>=2.0.0
+flask-cors>=3.0.0
+pandas>=1.3.0
+numpy>=1.21.0
+akshare>=1.17.0
+xlrd>=2.0.0
+requests>=2.25.0
+
+# GUI后端支持（选择其一）
+# Qt后端（推荐，跨平台支持好）
+PySide6>=6.0.0
+qtpy>=2.0.0
+
+# 或者使用PyQt5（备选方案）
+# PyQt5>=5.15.0
+# qtpy>=2.0.0
+
+# 原项目依赖
+aiohappyeyeballs>=2.6.1
+aiohttp>=3.12.15
+aiosignal>=1.4.0
+akracer>=0.0.13
+attrs>=25.3.0
+decorator>=5.2.1
+frozenlist>=1.7.0
+jsonpath>=0.82.2
+multidict>=6.6.4
+nest-asyncio>=1.6.0
+propcache>=0.3.2
+py-mini-racer>=0.6.0
+yarl>=1.20.1
+

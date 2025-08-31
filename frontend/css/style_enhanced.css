@@ -1,0 +1,1077 @@
+/* 全局样式 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background-color: #f5f5f5;
+    color: #333;
+    overflow: hidden;
+}
+
+.screen {
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* 按钮样式 */
+.btn {
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    outline: none;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.btn-primary {
+    background-color: #1890ff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background-color: #40a9ff;
+}
+
+.btn-secondary {
+    background-color: #f0f0f0;
+    color: #333;
+}
+
+.btn-secondary:hover {
+    background-color: #e6e6e6;
+}
+
+.btn-success {
+    background-color: #52c41a;
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: #73d13d;
+}
+
+.btn-danger {
+    background-color: #ff4d4f;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #ff7875;
+}
+
+.btn-warning {
+    background-color: #faad14;
+    color: white;
+}
+
+.btn-warning:hover {
+    background-color: #ffc53d;
+}
+
+/* 用户选择界面 */
+#user-selection {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.user-selection-container {
+    background: white;
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+    min-width: 400px;
+    text-align: center;
+    position: relative;
+}
+
+.version-badge {
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    background: #1890ff;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.user-selection-container h1 {
+    margin-bottom: 30px;
+    color: #333;
+    font-size: 28px;
+    font-weight: 600;
+}
+
+.user-list h2 {
+    margin-bottom: 20px;
+    color: #666;
+    font-size: 18px;
+    font-weight: 500;
+}
+
+#existing-users {
+    margin-bottom: 20px;
+}
+
+.user-item {
+    padding: 12px 20px;
+    margin: 8px 0;
+    background: #d7e4f1;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.user-item:hover {
+    background: #e9ecef;
+    border-color: #1890ff;
+}
+
+.new-user-section {
+    border-top: 1px solid #e9ecef;
+    padding-top: 20px;
+    margin-top: 20px;
+}
+
+#new-username {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    transition: border-color 0.2s ease;
+}
+
+#new-username:focus {
+    outline: none;
+    border-color: #1890ff;
+}
+
+#create-user-btn {
+    width: 100%; /* 与上方的输入框宽度保持一致 */
+    padding: 12px; /* 提供足够大的点击区域，与输入框高度匹配 */
+    font-size: 16px; /* 使字体清晰易读 */
+    font-weight: 600; /* 字体加粗，突出操作性 */
+    color: #fff; /* 白色文字 */
+    background-color: #1890ff; /* 使用应用的主题蓝色 */
+    border: none; /* 移除默认边框 */
+    border-radius: 6px; /* 与输入框和其他元素的圆角保持一致 */
+    cursor: pointer; /* 鼠标悬停时显示手型光标 */
+    transition: background-color 0.3s ease, transform 0.1s ease; /* 添加平滑的过渡效果 */
+    margin-top: 8px; /* 与输入框保持一点间距 */
+}
+
+#create-user-btn:hover {
+    background-color: #40a9ff; /* 鼠标悬停时颜色变亮，提供反馈 */
+    transform: translateY(-2px); /* 轻微上移，增加动态感 */
+}
+
+#create-user-btn:active {
+    background-color: #096dd9; /* 点击时颜色变深，提供即时反馈 */
+    transform: translateY(0); /* 点击时恢复原位 */
+}
+
+/* 主应用界面 */
+#main-app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* 工具栏 */
+.toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: white;
+    border-bottom: 1px solid #e9ecef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.current-user {
+    font-size: 14px;
+    color: #666;
+}
+
+.user-stats {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 4px 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.stat-item span:first-child {
+    color: #666;
+    font-size: 10px;
+}
+
+.stat-item span:last-child {
+    font-weight: 600;
+    margin-top: 2px;
+}
+
+.positive {
+    color: #ff4d4f;
+}
+
+.negative {
+    color: #008000;
+}
+
+.toolbar-center {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+.toolbar-center h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.bar-id-display {
+    font-size: 12px;
+    color: #666;
+    background: #f0f0f0;
+    padding: 2px 8px;
+    border-radius: 12px;
+}
+
+.toolbar-right {
+    display: flex;
+    gap: 8px;
+}
+
+/* 模态框 */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    padding: 30px;
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    min-width: 500px;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+.modal-content h2 {
+    margin-bottom: 24px;
+    color: #333;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+/* 标签页 */
+.setup-tabs {
+    display: flex;
+    margin-bottom: 24px;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.tab-btn {
+    padding: 12px 24px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 14px;
+    color: #666;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.tab-btn.active {
+    color: #1890ff;
+    border-bottom-color: #1890ff;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* 表单 */
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 500;
+    color: #333;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 2px solid #e9ecef;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border-color 0.2s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #1890ff;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 24px;
+}
+
+/* 训练界面 */
+#training-interface {
+    display: flex;
+    flex: 1;
+    height: calc(100vh - 60px);
+}
+
+/* 左侧面板 */
+.left-panel {
+    width: 280px;
+    background: white;
+    border-right: 1px solid #e9ecef;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+.control-section {
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.control-section:last-child {
+    border-bottom: none;
+}
+
+.control-section h3 {
+    margin-bottom: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+.info-section {
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.info-section:last-child {
+    border-bottom: none;
+}
+
+.info-section h3 {
+    margin-bottom: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+}
+
+/* 训练控制 */
+.training-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.progress-info {
+    font-size: 12px;
+    color: #666;
+    background: #f8f9fa;
+    padding: 8px;
+    border-radius: 4px;
+    text-align: center;
+    margin-bottom: 8px;
+}
+
+.training-controls .btn {
+    width: 100%;
+}
+
+/* 回放控制 */
+.playback-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.speed-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.speed-control label {
+    font-size: 14px;
+    color: #666;
+}
+
+.speed-control select {
+    padding: 6px 8px;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.shortcut-help {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 12px;
+}
+
+.shortcut-help h4 {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.shortcut-item {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 2px;
+}
+
+/* 设置菜单 */
+.settings-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.setting-group {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+}
+
+.setting-group label {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 8px;
+    display: block;
+}
+
+/* 复权控制 */
+.adjustment-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.adjustment-controls label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+/* 交易控制 */
+.trade-input {
+    margin-bottom: 12px;
+}
+
+.trade-input label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 14px;
+    color: #666;
+}
+
+.trade-input input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.max-quantity-info {
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+}
+
+.trade-buttons {
+    display: flex;
+    gap: 8px;
+}
+
+.trade-buttons .btn {
+    flex: 1;
+    font-size: 12px;
+}
+
+/* 账户信息 */
+.account-info {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+}
+
+.info-item span:first-child {
+    color: #666;
+}
+
+.info-item span:last-child {
+    font-weight: 600;
+    color: #333;
+}
+
+/* 持仓信息 */
+.positions-list {
+    font-size: 14px;
+}
+
+.no-positions {
+    color: #999;
+    text-align: center;
+    padding: 20px 0;
+}
+
+.position-summary {
+    background: #f8f9fa;
+    padding: 12px;
+    border-radius: 6px;
+}
+
+.position-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    margin-bottom: 4px;
+}
+
+.position-item:last-child {
+    margin-bottom: 0;
+}
+
+/* 图表容器 */
+.chart-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: white;
+    min-height: 0; /* 防止flex子项溢出 */
+}
+
+.chart-header {
+    padding: 5px 20px;
+    border-bottom: 1px solid #e9ecef;
+    background: #fafafa;
+}
+
+.stock-info {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    font-size: 16px;
+}
+
+.stock-info span {
+    font-weight: 500;
+}
+
+#stock-name {
+    color: #333;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+#current-date {
+    color: #666;
+}
+
+#current-price {
+    color: #1890ff;
+    font-weight: 600;
+}
+
+.chart {
+    flex: 1;
+    /*min-height: 300px;*/
+    position: relative; /* 确保内部绝对定位的元素（如信息框）正常工作 */
+}
+
+.volume-chart {
+    height: 100px;
+    border-top: 1px solid #e9ecef;
+    flex-shrink: 0;
+}
+
+.indicator-header {
+    padding: 8px 20px;
+    border-top: 1px solid #e9ecef;
+    background: #fafafa;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.indicator-header label {
+    font-size: 14px;
+    color: #666;
+}
+
+.indicator-header select {
+    padding: 4px 8px;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.indicator-chart {
+    height: 120px;
+    border-top: 1px solid #e9ecef;
+    flex-shrink: 0;
+}
+
+.chart-info-display {
+    position: absolute;
+    z-index: 10;
+    background-color: rgba(255, 255, 255, 0.85);
+    border: 1px solid #f0f0f0;
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 12px;
+    pointer-events: none; /* 避免遮挡鼠标事件 */
+    display: none; /* 默认隐藏 */
+    line-height: 1.5;
+}
+
+/* 右侧面板 */
+.right-panel {
+    width: 280px;
+    background: white;
+    border-left: 1px solid #e9ecef;
+    padding: 20px;
+    overflow-y: auto;
+}
+
+/* 当日详情 */
+.daily-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.detail-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+}
+
+.detail-item span:first-child {
+    color: #666;
+}
+
+.detail-item span:last-child {
+    font-weight: 600;
+    color: #333;
+}
+
+/* 交易记录 */
+.trade-list {
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.no-trades {
+    color: #999;
+    text-align: center;
+    padding: 20px 0;
+}
+
+.trade-item {
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.trade-item.buy {
+    border-left: 4px solid #ff4d4f;
+}
+
+.trade-item.sell {
+    border-left: 4px solid #008000;
+}
+
+.trade-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.trade-action {
+    font-weight: 600;
+}
+
+.trade-time {
+    color: #666;
+    font-size: 11px;
+}
+
+.trade-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    font-size: 11px;
+    color: #666;
+}
+
+/* 复盘报告 */
+.report-container {
+    padding: 40px;
+    background: white;
+    margin: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
+
+.report-container h2 {
+    margin-bottom: 24px;
+    color: #333;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.report-summary {
+    margin-bottom: 32px;
+}
+
+.report-summary h3 {
+    margin-bottom: 16px;
+    color: #333;
+    font-size: 18px;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.summary-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: #f8f9fa;
+    border-radius: 6px;
+}
+
+.summary-item .label {
+    color: #666;
+    font-size: 14px;
+}
+
+.summary-item .value {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.trade-details-section {
+    margin-bottom: 32px;
+}
+
+.trade-details-section h3 {
+    margin-bottom: 16px;
+    color: #333;
+    font-size: 18px;
+}
+
+.trade-details-table {
+    overflow-x: auto;
+}
+
+.trade-details-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.trade-details-table th,
+.trade-details-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.trade-details-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #333;
+}
+
+.trade-details-table .buy {
+    color: #ff4d4f;
+}
+
+.trade-details-table .sell {
+    color: #008000;
+}
+
+.trade-details-table tfoot .total-row {
+    background-color: #f0f0f0; /* 淡灰色背景 */
+    font-weight: bold;         /* 字体加粗 */
+    border-top: 2px solid #ccc; /* 顶部边框，与数据行分隔 */
+}
+
+.report-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 24px;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+    .left-panel,
+    .right-panel {
+        width: 240px;
+    }
+}
+
+@media (max-width: 768px) {
+    #training-interface {
+        flex-direction: column;
+    }
+    
+    .left-panel,
+    .right-panel {
+        width: 100%;
+        height: auto;
+        max-height: 200px;
+    }
+    
+    .chart-container {
+        order: -1;
+    }
+    
+    .toolbar {
+        flex-direction: column;
+        gap: 8px;
+        padding: 8px 16px;
+    }
+    
+    .toolbar-left,
+    .toolbar-right {
+        justify-content: center;
+    }
+    
+    .user-stats {
+        flex-wrap: wrap;
+    }
+}
+
+/* 动画效果 */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.screen {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #c1c1c1;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #a8a8a8;
+}
+
+/* 特殊状态样式 */
+.preview-bar {
+    opacity: 0.6;
+}
+
+.current-bar {
+    box-shadow: 0 0 10px rgba(24, 144, 255, 0.3);
+}
+
+/* 工具提示 */
+.tooltip {
+    position: relative;
+}
+
+.tooltip:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+}
+
+/* 快捷键触发器和提示框的容器 */
+.shortcut-trigger-container {
+    position: relative; /* 这是关键，为了让提示框相对于它定位 */
+    margin-top: 16px;
+    align-self: center; /* 让容器在父元素中居中 */
+}
+
+/* 快捷键触发器 (可见的按钮/标签) */
+.shortcut-trigger {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background-color: #f0f2f5;
+    border-radius: 16px; /* 圆角使其看起来像个胶囊按钮 */
+    color: #595959;
+    font-size: 12px;
+    cursor: pointer; /* 提示用户这是可交互的 */
+    transition: background-color 0.2s ease;
+}
+
+.shortcut-trigger:hover {
+    background-color: #e6e9ec;
+}
+
+/* 快捷键提示框 (默认隐藏) */
+.shortcut-tooltip {
+    display: none; /* 默认隐藏 */
+    position: absolute;
+    bottom: 100%; /* 定位在触发器的正上方 */
+    left: 50%;
+    transform: translateX(-50%); /* 水平居中 */
+    margin-bottom: 8px; /* 与触发器保持一点间距 */
+
+    background-color: #262626; /* 深色背景 */
+    color: #fff; /* 白色文字 */
+    padding: 12px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    width: max-content; /* 宽度由内容决定 */
+    z-index: 10; /* 确保在顶层显示 */
+    text-align: left;
+}
+
+/* 核心交互：当鼠标悬停在容器上时，显示提示框 */
+.shortcut-trigger-container:hover .shortcut-tooltip {
+    display: block;
+}
+
+/* 提示框内项目的样式 */
+.shortcut-tooltip .shortcut-item {
+    font-size: 13px;
+    margin-bottom: 6px;
+    white-space: nowrap; /* 防止换行 */
+}
+
+.shortcut-tooltip .shortcut-item:last-child {
+    margin-bottom: 0;
+}
+
+.shortcut-tooltip .shortcut-item strong {
+    color: #87e8de; /* 给快捷键本身一个高亮颜色 */
+    margin-right: 8px;
+}
