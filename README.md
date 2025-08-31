@@ -1,6 +1,7 @@
 
 # A股K线复盘训练 - PyWebView桌面版
 
+[![支持与服务](https://img.shields.io/badge/Support%20%26%20Services-联系作者-blue?style=for-the-badge )](https://github.com/fat7/KLinePlayground#%E2%9A%99%EF%B8%8F-%E6%94%AF%E6%8C%81%E4%B8%8E%E6%9C%8D%E5%8A%A1 )
 
 
 这是一个基于 `PyWebView`、`Flask` 和 `Lightweight Charts` 构建的A股K线复盘训练桌面应用。它允许用户在真实的历史行情数据上进行模拟交易，以训练和提升自己的盘感、策略和决策能力。
@@ -106,4 +107,23 @@ python main_pywebview.py
 
 本项目采用 [MIT License](LICENSE) 开源。
 
----
+## ⚙️ 支持与服务
+
+本项目是一个开源软件，作者投入了大量时间和精力进行开发和维护。如果您觉得这个项目对您有帮助，可以通过以下方式支持作者：
+
+### 接受赞赏 (Sponsor)
+
+您的支持是作者持续更新和改进项目的最大动力！欢迎通过支付宝或微信扫码赞赏。
+
+| 支付宝 (Alipay) | 微信支付 (WeChat Pay) |
+| :---: | :---: |
+| <img src="https://github.com/user-attachments/assets/f7fa53b8-cdb1-4a0c-9677-ce5d0c60c1a7" alt="Alipay QR Code" width="180"> | <img src="https://github.com/user-attachments/assets/955c873f-de30-4496-ac16-9f0b3c2c39c8" alt="WeChat Pay QR Code" width="180"> |
+
+### 商业服务 (Commercial Services)
+
+除了开源版本外，本人（作者）也可以提供一系列付费的商业服务，以满足个人、团队或企业的深度需求。如果您有以下任何需求，欢迎通过 [GitHub Issues](https://github.com/fat7/KLinePlayground/issues) 或其他联系方式与我取得联系：
+
+*   **技术支持服务**: 为您在使用过程中遇到的问题提供优先级的技术支持和解决方案。
+*   **定制化开发**: 根据您的具体需求，对软件进行功能定制、添加新指标、对接特定数据源或API等。
+*   **企业内训**: 为您的团队提供关于项目架构、量化交易基础、代码实现等方面的培训。
+*   **咨询服务**: 提供与项目相关的技术选型、架构设计、策略实现等方面的专业咨询。
