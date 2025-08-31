@@ -7,6 +7,10 @@
 这是一个基于 `PyWebView`、`Flask` 和 `Lightweight Charts` 构建的A股K线复盘训练桌面应用。它允许用户在真实的历史行情数据上进行模拟交易，以训练和提升自己的盘感、策略和决策能力。
 
 该应用将Python后端（数据处理、交易逻辑）与现代Web前端（图表展示、用户交互）相结合，提供了一个功能丰富、响应迅速的本地化训练环境。
+<img width="1375" height="859" alt="962c3469b4bea6fc3656c77b45218887" src="https://github.com/user-attachments/assets/0194ddb6-7d68-4e57-8b4d-8c000ce75d37" />
+<img width="2748" height="1658" alt="image" src="https://github.com/user-attachments/assets/aed924c1-0883-431f-8b5e-f1edd7a3d907" />
+<img width="1374" height="829" alt="c93a0a8832f5b95dfce83af950b188c4" src="https://github.com/user-attachments/assets/b00db3d4-4a60-490d-a1dc-966be6f6366e" />
+<img width="1375" height="859" alt="73288681a0dac09c4f72ff8b2f4ecda1" src="https://github.com/user-attachments/assets/ef25345c-284c-47e7-91c0-dde613922065" />
 
 ## ✨ 主要功能
 
