@@ -58,8 +58,8 @@
 ### 2. 克隆项目
 
 ```bash
-git clone <your-repository-url>
-cd <project-directory>
+git clone https://github.com/fat7/KLinePlayground
+cd KLinePlayground
 ```
 
 ### 3. 安装依赖
