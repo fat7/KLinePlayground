@@ -7,19 +7,28 @@ import random
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
 
+try:
+    from xtquant import xtdata
+    XTDATA_AVAILABLE = True
+except ImportError:
+    XTDATA_AVAILABLE = False
+
+
 class DataManager:
     """数据管理器，负责股票数据的下载、存储和读取"""
     
-    def __init__(self, data_dir='../data'):
+    def __init__(self, data_dir='./data'):
         self.data_dir = data_dir
         self.kline_dir = os.path.join(data_dir, 'kline_raw')
         self.factor_dir = os.path.join(data_dir, 'factor')
         self.dividend_dir = os.path.join(data_dir, 'ex_dividend')
+        self.offline_dir = os.path.join(data_dir, 'a_market_offline')
         
         # 确保目录存在
         os.makedirs(self.kline_dir, exist_ok=True)
         os.makedirs(self.factor_dir, exist_ok=True)
         os.makedirs(self.dividend_dir, exist_ok=True)
+        os.makedirs(self.offline_dir, exist_ok=True)
         
         # 股票列表缓存
         self.stock_list = None
@@ -66,8 +75,108 @@ class DataManager:
             print(f"加载股票列表失败: {e}")
             return self.download_stock_list()
     
-    def download_stock_data(self, stock_code: str, start_date: str = '2010-01-01'):
-        """下载单只股票的历史数据"""
+    def _format_xt_code(self, stock_code: str) -> str:
+        """为xtdata格式化股票代码，添加市场后缀"""
+        if stock_code.startswith(('60', '68', '69')):
+            return f"{stock_code}.SH"
+        elif stock_code.startswith(('00', '30')):
+            return f"{stock_code}.SZ"
+        elif stock_code.startswith(('43', '83', '87', '92')):
+            return f"{stock_code}.BJ"
+        return stock_code
+        
+    def _get_offline_file(self, stock_code: str) -> Optional[str]:
+        """获取离线数据文件路径"""
+        if not os.path.exists(self.offline_dir):
+            return None
+        for suffix in ['.SZ', '.SH', '.BJ']:
+            path = os.path.join(self.offline_dir, f"{stock_code}{suffix}.csv")
+            if os.path.exists(path):
+                return path
+        return None
+
+    def download_stock_data(self, stock_code: str, start_date: str = '2010-01-01', source: str = 'akshare') -> bool:
+        """下载单只股票的历史数据，支持akshare和xtdata双源"""
+        if source == 'xtdata':
+            return self._download_stock_data_xt(stock_code, start_date)
+        return self._download_stock_data_ak(stock_code, start_date)
+
+    def _download_stock_data_xt(self, stock_code: str, start_date: str) -> bool:
+        """使用 xtquant 的 xtdata 下载数据"""
+        if not XTDATA_AVAILABLE:
+            print("xtquant 未安装或无法导入。")
+            return False
+            
+        try:
+            print(f"正在通过 xtdata 下载 {stock_code} 的历史数据...")
+            xt_code = self._format_xt_code(stock_code)
+            start_time = start_date.replace('-', '')
+            end_time = datetime.now().strftime('%Y%m%d')
+            
+            # 尝试下载
+            xtdata.download_history_data2(
+                stock_list=[xt_code], period='1d', start_time=start_time, end_time=end_time
+            )
+            
+            # 获取未复权原始数据
+            raw_dict = xtdata.get_market_data(
+                field_list=['time', 'open', 'close', 'high', 'low', 'volume', 'amount'],
+                stock_list=[xt_code], period='1d',
+                start_time=start_time, end_time=end_time,
+                dividend_type='none', fill_data=True
+            )
+            
+            # dataframe转换
+            df_raw = pd.DataFrame({
+                'date': raw_dict['time'][xt_code],
+                'open': raw_dict['open'][xt_code],
+                'close': raw_dict['close'][xt_code],
+                'high': raw_dict['high'][xt_code],
+                'low': raw_dict['low'][xt_code],
+                'volume': raw_dict['volume'][xt_code],
+                'amount': raw_dict['amount'][xt_code]
+            })
+            
+            if df_raw.empty:
+                print(f"实时/历史缓存中未获取到 {stock_code} 数据")
+                return False
+                
+            # 重命名列并格式化时间
+            df_raw['date'] = df_raw['date'].astype(str).str[:8]
+            df_raw['date'] = pd.to_datetime(df_raw['date'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
+            
+            # 获取前复权数据以计算复权因子
+            adj_dict = xtdata.get_market_data(
+                field_list=['time', 'close'],
+                stock_list=[xt_code], period='1d',
+                start_time=start_time, end_time=end_time,
+                dividend_type='front', fill_data=True
+            )
+            
+            # 保存K线
+            kline_path = os.path.join(self.kline_dir, f'{stock_code}.csv')
+            df_raw.to_csv(kline_path, index=False, encoding='utf-8')
+            
+            if not adj_dict['close'].empty:
+                df_adj = pd.DataFrame({'date': adj_dict['time'][xt_code], 'close_adj': adj_dict['close'][xt_code]})
+                df_adj['date'] = df_adj['date'].astype(str).str[:8]
+                df_adj['date'] = pd.to_datetime(df_adj['date'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
+                
+                # 合并计算因子 factor
+                merged = pd.merge(df_raw[['date', 'close']], df_adj[['date', 'close_adj']], on='date')
+                merged['factor'] = merged['close_adj'] / merged['close']
+                
+                factor_path = os.path.join(self.factor_dir, f'{stock_code}.csv')
+                merged[['date', 'factor']].to_csv(factor_path, index=False, encoding='utf-8')
+            
+            print(f"xtdata 获取并处理股票 {stock_code} 数据完成")
+            return True
+        except Exception as e:
+            print(f"通过 xtdata 下载 {stock_code} 失败: {e}")
+            return False
+
+    def _download_stock_data_ak(self, stock_code: str, start_date: str = '2010-01-01') -> bool:
+        """旧版 akshare 下载逻辑"""
         try:
             print(f"正在下载 {stock_code} 的历史数据...")
             
@@ -132,9 +241,32 @@ class DataManager:
             print(f"下载股票 {stock_code} 数据失败: {e}")
             return False
     
-    def get_stock_data(self, stock_code: str) -> Optional[pd.DataFrame]:
+    def get_stock_data(self, stock_code: str, source: str = 'akshare') -> Optional[pd.DataFrame]:
         """获取股票K线数据"""
         try:
+            if source == 'offline':
+                offline_path = self._get_offline_file(stock_code)
+                if offline_path:
+                    data = pd.read_csv(offline_path, encoding='utf-8')
+                    # 适配离线数据列名
+                    if '交易日' in data.columns:
+                        data = data.rename(columns={
+                            '交易日': 'date', '开盘价': 'open', '最高价': 'high', 
+                            '最低价': 'low', '收盘价': 'close', '成交量（手）': 'volume', 
+                            '成交额（千元）': 'amount'
+                        })
+                    if 'date' in data.columns:
+                        data['date'] = data['date'].astype(str)
+                        if data['date'].iloc[0].isdigit() and len(data['date'].iloc[0]) == 8:
+                            data['date'] = pd.to_datetime(data['date'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
+                        data['date'] = pd.to_datetime(data['date'])
+                        data = data.sort_values('date').reset_index(drop=True)
+                        return data
+                    return None
+                else:
+                    print(f"找不到离线数据: {stock_code}")
+                    return None
+
             kline_path = os.path.join(self.kline_dir, f'{stock_code}.csv')
             if os.path.exists(kline_path):
                 data = pd.read_csv(kline_path)
@@ -142,16 +274,36 @@ class DataManager:
                 return data
             else:
                 # 尝试下载数据
-                if self.download_stock_data(stock_code):
-                    return self.get_stock_data(stock_code)
+                if self.download_stock_data(stock_code, start_date='2010-01-01', source=source):
+                    return self.get_stock_data(stock_code, source=source)
                 return None
         except Exception as e:
             print(f"获取股票 {stock_code} 数据失败: {e}")
             return None
     
-    def get_factor_data(self, stock_code: str) -> Optional[pd.DataFrame]:
+    def get_factor_data(self, stock_code: str, source: str = 'akshare') -> Optional[pd.DataFrame]:
         """获取复权因子数据"""
         try:
+            if source == 'offline':
+                offline_path = self._get_offline_file(stock_code)
+                if offline_path:
+                    data = pd.read_csv(offline_path, encoding='utf-8')
+                    if '交易日' in data.columns and '复权因子' in data.columns:
+                        data = data[['交易日', '复权因子']].rename(columns={'交易日': 'date', '复权因子': 'factor'})
+                    elif 'date' in data.columns and 'factor' in data.columns:
+                        data = data[['date', 'factor']]
+                    else:
+                        print(f"离线数据 {stock_code} 中找不到复权因子列")
+                        return None
+                    
+                    data['date'] = data['date'].astype(str)
+                    if data['date'].iloc[0].isdigit() and len(data['date'].iloc[0]) == 8:
+                        data['date'] = pd.to_datetime(data['date'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
+                    data['date'] = pd.to_datetime(data['date'])
+                    data = data.sort_values('date').reset_index(drop=True)
+                    return data
+                return None
+
             factor_path = os.path.join(self.factor_dir, f'{stock_code}.csv')
             if os.path.exists(factor_path):
                 data = pd.read_csv(factor_path)
@@ -181,11 +333,11 @@ class DataManager:
         
         return self.stock_names.get(stock_code, f"股票{stock_code}")
     
-    def validate_stock_and_date(self, stock_code: str, start_date: str) -> bool:
+    def validate_stock_and_date(self, stock_code: str, start_date: str, source: str = 'akshare') -> bool:
         """验证股票代码和日期的有效性"""
         try:
             # 检查股票是否存在
-            data = self.get_stock_data(stock_code)
+            data = self.get_stock_data(stock_code, source)
             if data is None or data.empty:
                 return False
             
@@ -199,7 +351,7 @@ class DataManager:
             print(f"验证股票和日期失败: {e}")
             return False
     
-    def get_random_stock(self, sector: str = 'all', year_range: str = '2020-2024') -> Tuple[str, str]:
+    def get_random_stock(self, sector: str = 'all', year_range: str = '2020-2024', source: str = 'akshare') -> Tuple[str, str]:
         """随机选择股票和起始日期"""
         try:
             if self.stock_list is None:
@@ -243,11 +395,11 @@ class DataManager:
             start_date = f"{random_year}-{random_month:02d}-{random_day:02d}"
             
             # 验证选择的股票和日期
-            if self.validate_stock_and_date(stock_code, start_date):
+            if self.validate_stock_and_date(stock_code, start_date, source=source):
                 return stock_code, start_date
             else:
                 # 如果验证失败，递归重试
-                return self.get_random_stock(sector, year_range)
+                return self.get_random_stock(sector, year_range, source=source)
         except Exception as e:
             print(f"随机选择股票失败: {e}")
             # 返回默认值

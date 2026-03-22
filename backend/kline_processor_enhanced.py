@@ -7,15 +7,15 @@ import time
 class KLineProcessorEnhanced:
     """增强版K线处理器，支持bar ID、前80根K线预览、技术指标等功能"""
     
-    def __init__(self, data_manager, stock_code: str, start_date: str):
+    def __init__(self, data_manager, stock_code: str, start_date: str, source: str = 'akshare'):
         self.data_manager = data_manager
         self.stock_code = stock_code
         self.start_date = pd.to_datetime(start_date)
         self.adjustment_mode = 'dynamic_forward'  # 'none', 'forward', 'backward', 'dynamic_forward'
         
         # 加载原始数据
-        self.raw_data = data_manager.get_stock_data(stock_code)
-        self.factor_data = data_manager.get_factor_data(stock_code)
+        self.raw_data = data_manager.get_stock_data(stock_code, source=source)
+        self.factor_data = data_manager.get_factor_data(stock_code, source=source)
         self.dividend_data = data_manager.get_dividend_data(stock_code)
         
         if self.raw_data is None or self.raw_data.empty:

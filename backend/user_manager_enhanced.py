@@ -47,7 +47,8 @@ class UserManagerEnhanced:
                     'min_commission': 5.0,      # 最低5元
                     'stamp_tax_rate': 0.001,    # 千分之1
                     'adjustment_mode': 'dynamic_forward',  # 默认复权方式为动态前复权
-                    'default_initial_capital': 100000 # 默认初始资金
+                    'default_initial_capital': 100000, # 默认初始资金
+                    'ma_periods': [5, 10, 20] # 默认MA周期
                 },
                 'preferences': {
                     # 'default_capital': 100000,

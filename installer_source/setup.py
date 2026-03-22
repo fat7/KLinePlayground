@@ -192,9 +192,18 @@ def main_install():
     # 步骤 5: 创建桌面快捷方式
     try:
         desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+        
+        # 主程序快捷方式
         shortcut_file = os.path.join(desktop_path, f"{APP_NAME}.lnk")
         target_exe = os.path.join(bin_path, f"{APP_NAME}.exe")
         create_shortcut(target_exe, shortcut_file)
+        
+        # AI 策略测试器快捷方式
+        ai_tester_exe = os.path.join(bin_path, "KLineTrainer_AI策略测试器.exe")
+        if os.path.exists(ai_tester_exe):
+            ai_shortcut_file = os.path.join(desktop_path, f"{APP_NAME}_AI策略测试器.lnk")
+            create_shortcut(ai_tester_exe, ai_shortcut_file)
+            
     except Exception as e:
         messagebox.showwarning("警告", f"创建桌面快捷方式失败: {e}\n但程序已安装成功。")
 

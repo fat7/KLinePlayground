@@ -7,13 +7,18 @@ import os
 import sys
 import threading
 import time
+import socket
+import urllib.request
+import urllib.error
 import webview
 from pathlib import Path
 from flask import Flask
 
 
-# 添加当前目录到Python路径
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# 添加项目根目录到Python路径，以便能够导入同级的 backend 模块
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 # 导入后端应用
 from backend.app_enhanced import app
@@ -22,14 +27,24 @@ class KLineTrainerApp:
     def __init__(self):
         self.flask_app = app
         self.server = None
-        self.port = 5000
+        self.port = self.find_free_port()
+        
+    def find_free_port(self):
+        """查找可用端口"""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
         
     def start_flask_server(self):
         """启动Flask服务器"""
         try:
             # 确保数据目录存在
-            data_dir = Path(__file__).parent / '..'  / 'data'
-            users_dir = Path(__file__).parent / '..'  / 'users'
+            if getattr(sys, 'frozen', False):
+                base_dir = Path(sys.executable).parent
+            else:
+                base_dir = Path(__file__).parent.parent
+            data_dir = base_dir / 'data'
+            users_dir = base_dir / 'users'
             data_dir.mkdir(exist_ok=True)
             users_dir.mkdir(exist_ok=True)
             
@@ -86,7 +101,7 @@ def main():
     """主函数"""
     print()
     print("=" * 60)
-    print("A股K线复盘训练 - PyWebView桌面版 v2.0")
+    print("A股K线复盘训练 - 桌面版 v3.0")
     print("=" * 60)
     print()
     
@@ -106,14 +121,25 @@ def main():
     
     # 等待服务启动
     print("等待服务启动...")
-    time.sleep(3)
+    max_retries = 30
+    is_ready = False
+    health_url = f"http://127.0.0.1:{app_instance.port}/api/health"
     
-    # 获取前端文件路径
-    frontend_path = get_resource_path('frontend/index_enhanced.html')
-    
-    if not frontend_path.exists():
-        print(f"错误: 前端文件不存在 {frontend_path}")
+    for _ in range(max_retries):
+        try:
+            response = urllib.request.urlopen(health_url, timeout=1)
+            if response.status == 200:
+                is_ready = True
+                break
+        except (urllib.error.URLError, socket.timeout):
+            pass
+        time.sleep(0.5)
+        
+    if not is_ready:
+        print(f"错误: 后端服务启动超时，无法在端口 {app_instance.port} 访问。")
         sys.exit(1)
+        
+    print("服务已就绪！")
     
     # 创建PyWebView窗口
     print("启动桌面应用...")
@@ -122,23 +148,24 @@ def main():
         # 创建窗口
         window = webview.create_window(
             title='A股K线复盘训练 - 桌面版',
-            url=f"file://{frontend_path.absolute()}",
+            url=f"http://127.0.0.1:{app_instance.port}/",
             width=1400,
             height=900,
             # min_size=(1200, 800),
             # maximized=True,
-            resizable=False,
+            # resizable=False,
             # on_top=False,
         )
         
         print()
         print("=" * 60)
         print("桌面应用已启动！")
-        print("后端API: http://127.0.0.1:5000/api")
+        print(f"后端API: http://127.0.0.1:{app_instance.port}/api")
         print("关闭窗口即可退出程序")
         print("=" * 60)
         
         # 启动PyWebView
+        # webview.start(debug=True)
         webview.start(debug=False)
         
     except Exception as e:

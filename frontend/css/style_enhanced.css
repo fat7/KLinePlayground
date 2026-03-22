@@ -91,6 +91,62 @@ body {
     background-color: #ffc53d;
 }
 
+.btn-info {
+    background-color: #1890ff;
+    color: white;
+}
+
+.btn-info:hover {
+    background-color: #40a9ff;
+}
+
+.btn-info:disabled {
+    background-color: #91d5ff;
+    cursor: not-allowed;
+}
+
+/* AI Commentary Styles */
+.ai-commentary-section {
+    margin-top: 20px;
+    padding: 20px;
+    background-color: #f6ffed;
+    border: 1px solid #b7eb8f;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+.ai-commentary-section h3 {
+    color: #52c41a;
+    margin-top: 0;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ai-content {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #333;
+}
+
+.ai-content p {
+    margin-bottom: 1em;
+}
+
+.ai-content ul, .ai-content ol {
+    margin-bottom: 1em;
+    padding-left: 20px;
+}
+
+.ai-content li {
+    margin-bottom: 0.5em;
+}
+
+.ai-content strong {
+    color: #1890ff;
+}
+
 /* 用户选择界面 */
 #user-selection {
     display: flex;
@@ -675,6 +731,7 @@ body {
     height: 100px;
     border-top: 1px solid #e9ecef;
     flex-shrink: 0;
+    position: relative;
 }
 
 .indicator-header {
@@ -702,6 +759,7 @@ body {
     height: 120px;
     border-top: 1px solid #e9ecef;
     flex-shrink: 0;
+    position: relative;
 }
 
 .chart-info-display {
@@ -715,6 +773,28 @@ body {
     pointer-events: none; /* 避免遮挡鼠标事件 */
     display: none; /* 默认隐藏 */
     line-height: 1.5;
+    top: 32px;
+    left: 8px;
+}
+
+.chart-legend {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 11;
+    display: flex;
+    gap: 6px;
+    pointer-events: none;
+}
+
+.legend-chip {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #fff;
+    background: #999;
+    opacity: 0.95;
 }
 
 /* 右侧面板 */

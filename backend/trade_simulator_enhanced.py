@@ -273,24 +273,41 @@ class TradeSimulatorEnhanced:
             }
             self.position_lots.append(position_lot)
             
-            # 记录交易
-            trade_record = {
-                'stock_code': self.stock_code,
-                'action': 'buy',
-                'quantity': quantity,  # 记录手数
-                'price': price,
-                'amount': amount,
-                'commission': commission,
-                'stamp_tax': 0.0,  # 买入无印花税
-                'net_amount': total_cost,
-                'trade_date': trade_date,
-                'bar_id': self.current_bar_id,
-                'timestamp': datetime.now().isoformat()
-            }
-            self.trade_history.append(trade_record)
+            # 记录交易 (检查是否同日有相同的买入操作，如果有则合并)
+            merged = False
+            if self.trade_history:
+                last_trade = self.trade_history[-1]
+                if last_trade['trade_date'] == trade_date and last_trade['action'] == 'buy':
+                    # 合并记录
+                    old_amount = last_trade['amount']
+                    last_trade['quantity'] += quantity
+                    last_trade['amount'] += amount
+                    last_trade['commission'] += commission
+                    last_trade['net_amount'] += total_cost
+                    # 重新计算平均价格
+                    last_trade['price'] = last_trade['amount'] / (last_trade['quantity'] * 100)
+                    last_trade['timestamp'] = datetime.now().isoformat()
+                    trade_record = last_trade
+                    merged = True
+            
+            if not merged:
+                trade_record = {
+                    'stock_code': self.stock_code,
+                    'action': 'buy',
+                    'quantity': quantity,  # 记录手数
+                    'price': price,
+                    'amount': amount,
+                    'commission': commission,
+                    'stamp_tax': 0.0,  # 买入无印花税
+                    'net_amount': total_cost,
+                    'trade_date': trade_date,
+                    'bar_id': self.current_bar_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+                self.trade_history.append(trade_record)
             
             # 保存到数据库
-            self._save_trade_to_db(trade_record)
+            self._save_trade_to_db(trade_record, update=merged)
             self._save_position_lot_to_db(position_lot)
             
             return {
@@ -341,24 +358,41 @@ class TradeSimulatorEnhanced:
             # 更新持仓汇总（FIFO原则）
             self._reduce_positions(total_shares, trade_date)
             
-            # 记录交易
-            trade_record = {
-                'stock_code': self.stock_code,
-                'action': 'sell',
-                'quantity': quantity,  # 记录手数
-                'price': price,
-                'amount': amount,
-                'commission': commission,
-                'stamp_tax': stamp_tax,
-                'net_amount': net_amount,
-                'trade_date': trade_date,
-                'bar_id': self.current_bar_id,
-                'timestamp': datetime.now().isoformat()
-            }
-            self.trade_history.append(trade_record)
+            # 记录交易 (检查是否同日有相同的卖出操作，如果有则合并)
+            merged = False
+            if self.trade_history:
+                last_trade = self.trade_history[-1]
+                if last_trade['trade_date'] == trade_date and last_trade['action'] == 'sell':
+                    # 合并记录
+                    last_trade['quantity'] += quantity
+                    last_trade['amount'] += amount
+                    last_trade['commission'] += commission
+                    last_trade['stamp_tax'] += stamp_tax
+                    last_trade['net_amount'] += net_amount
+                    # 重新计算平均价格
+                    last_trade['price'] = last_trade['amount'] / (last_trade['quantity'] * 100)
+                    last_trade['timestamp'] = datetime.now().isoformat()
+                    trade_record = last_trade
+                    merged = True
+
+            if not merged:
+                trade_record = {
+                    'stock_code': self.stock_code,
+                    'action': 'sell',
+                    'quantity': quantity,  # 记录手数
+                    'price': price,
+                    'amount': amount,
+                    'commission': commission,
+                    'stamp_tax': stamp_tax,
+                    'net_amount': net_amount,
+                    'trade_date': trade_date,
+                    'bar_id': self.current_bar_id,
+                    'timestamp': datetime.now().isoformat()
+                }
+                self.trade_history.append(trade_record)
             
             # 保存到数据库
-            self._save_trade_to_db(trade_record)
+            self._save_trade_to_db(trade_record, update=merged)
             
             return {
                 'success': True,
@@ -511,6 +545,7 @@ class TradeSimulatorEnhanced:
             })
         
         return {
+            'session_id': getattr(self, 'session_id', ''),
             'stock_code': stock_code,
             'stock_name': f'股票{stock_code}',
             'start_date': start_date,
@@ -553,63 +588,73 @@ class TradeSimulatorEnhanced:
         conn.commit()
         conn.close()
     
-    def _save_trade_to_db(self, trade: Dict):
+    def _save_trade_to_db(self, trade: Dict, update: bool = False):
         """保存交易记录到数据库"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO trades (stock_code, action, quantity, price, amount, commission, stamp_tax, net_amount, trade_date, bar_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            trade['stock_code'],
-            trade['action'],
-            trade['quantity'],
-            trade['price'],
-            trade['amount'],
-            trade['commission'],
-            trade['stamp_tax'],
-            trade['net_amount'],
-            trade['trade_date'],
-            trade['bar_id']
-        ))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            if update:
+                # 如果是更新，根据trade_date和action更新最后一条记录
+                cursor.execute('''
+                    UPDATE trades 
+                    SET quantity = ?, price = ?, amount = ?, commission = ?, stamp_tax = ?, net_amount = ?, created_at = ?
+                    WHERE id = (
+                        SELECT id FROM trades 
+                        WHERE stock_code = ? AND trade_date = ? AND action = ? 
+                        ORDER BY id DESC LIMIT 1
+                    )
+                ''', (
+                    trade['quantity'], trade['price'], trade['amount'], trade['commission'], 
+                    trade['stamp_tax'], trade['net_amount'], trade['timestamp'],
+                    trade['stock_code'], trade['trade_date'], trade['action']
+                ))
+            else:
+                cursor.execute('''
+                    INSERT INTO trades (stock_code, action, quantity, price, amount, commission, stamp_tax, net_amount, trade_date, bar_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    trade['stock_code'],
+                    trade['action'],
+                    trade['quantity'],
+                    trade['price'],
+                    trade['amount'],
+                    trade['commission'],
+                    trade['stamp_tax'],
+                    trade['net_amount'],
+                    trade['trade_date'],
+                    trade['bar_id']
+                ))
+            conn.commit()
     
     def _save_position_lot_to_db(self, lot: Dict):
         """保存持仓批次到数据库"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO position_lots (stock_code, quantity, cost_price, buy_date, buy_bar_id, available_date, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            lot['stock_code'],
-            lot['quantity'],
-            lot['cost_price'],
-            lot['buy_date'],
-            lot['buy_bar_id'],
-            lot['available_date'],
-            lot['status']
-        ))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                INSERT INTO position_lots (stock_code, quantity, cost_price, buy_date, buy_bar_id, available_date, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                lot['stock_code'],
+                lot['quantity'],
+                lot['cost_price'],
+                lot['buy_date'],
+                lot['buy_bar_id'],
+                lot['available_date'],
+                lot['status']
+            ))
+            conn.commit()
     
     def _update_position_lots_in_db(self):
         """更新数据库中的持仓批次状态"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        for lot in self.position_lots:
-            cursor.execute('''
-                UPDATE position_lots 
-                SET quantity = ?, status = ?
-                WHERE stock_code = ? AND buy_bar_id = ? AND status = 'active'
-            ''', (lot['quantity'], lot['status'], lot['stock_code'], lot['buy_bar_id']))
-        
-        conn.commit()
-        conn.close()
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            for lot in self.position_lots:
+                cursor.execute('''
+                    UPDATE position_lots 
+                    SET quantity = ?, status = ?
+                    WHERE stock_code = ? AND buy_bar_id = ? AND status = 'active'
+                ''', (lot['quantity'], lot['status'], lot['stock_code'], lot['buy_bar_id']))
+            conn.commit()
 

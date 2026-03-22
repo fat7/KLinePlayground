@@ -14,9 +14,14 @@ let currentTraining = null;
 let currentIndicatorType = 'MACD';
 let currentIndicatorSeries = [];
 let bollSeries = {}; // 用于存储BOLL指标线
+let autoSyncInterval = null;
+let lastKnownBarId = null;
+let lastKnownTradeCount = null;
+let maPeriods = [5, 10, 20]; // 默认MA周期
+const maColors = ['#1d2140', '#2816cf', '#ff8103', '#e02424', '#8b5cf6', '#059669']; // 6个预设颜色
 
-// API 基础URL
-const API_BASE = 'http://localhost:5000/api';
+// API 基础URL - 改为相对路径适配动态端口
+const API_BASE = '/api';
 
 // 初始化应用
 document.addEventListener('DOMContentLoaded', function () {
@@ -40,12 +45,92 @@ async function initializeApp() {
 
         // 加载用户列表
         await loadUsers();
+
+        // 如果有保存的用户，初始化 AI API 状态
+        if (currentUser) {
+            fetch(`${API_BASE}/users/${currentUser}/settings`)
+                .then(res => res.json())
+                .then(settings => {
+                    updateAIApiStatus(!!settings.enable_ai_api, currentUser);
+                }).catch(e => console.error(e));
+        }
     } catch (error) {
         console.error('初始化失败:', error);
         showUserSelection();
     }
 }
 
+async function updateAIApiStatus(enabled, username) {
+    try {
+        await fetch(`${API_BASE}/system/api_info`, {
+            method: enabled ? 'POST' : 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: username })
+        });
+    } catch (e) {
+        console.error('Failed to update AI API status:', e);
+    }
+}
+
+function renderChartLegend() {
+    const container = document.getElementById('chart-legend');
+    if (!container) return;
+    const items = [];
+    maPeriods.forEach(p => {
+        if (maSeries[p]) {
+            items.push({ label: `MA${p}`, color: maSeries[p].options().color });
+        }
+    });
+    if (bollSeries && bollSeries.upper && bollSeries.middle && bollSeries.lower) {
+        items.push({ label: 'UP', color: bollSeries.upper.options().color });
+        items.push({ label: 'MID', color: bollSeries.middle.options().color });
+        items.push({ label: 'LOW', color: bollSeries.lower.options().color });
+    }
+    container.innerHTML = '';
+    items.forEach(it => {
+        const el = document.createElement('span');
+        el.className = 'legend-chip';
+        el.style.backgroundColor = it.color || '#999';
+        el.textContent = it.label;
+        container.appendChild(el);
+    });
+}
+
+function renderIndicatorLegend() {
+    const container = document.getElementById('indicator-legend');
+    if (!container) return;
+    container.innerHTML = '';
+    const items = [];
+    switch (currentIndicatorType) {
+        case 'MACD':
+            if (currentIndicatorSeries[0]) items.push({ label: 'DIF', color: currentIndicatorSeries[0].options().color });
+            if (currentIndicatorSeries[1]) items.push({ label: 'DEA', color: currentIndicatorSeries[1].options().color });
+            items.push({ label: 'MACD', color: '#999' });
+            break;
+        case 'KDJ':
+            if (currentIndicatorSeries[0]) items.push({ label: 'K', color: currentIndicatorSeries[0].options().color });
+            if (currentIndicatorSeries[1]) items.push({ label: 'D', color: currentIndicatorSeries[1].options().color });
+            if (currentIndicatorSeries[2]) items.push({ label: 'J', color: currentIndicatorSeries[2].options().color });
+            break;
+        case 'RSI':
+            currentIndicatorSeries.forEach(series => {
+                items.push({ label: series.rsiTitle || series.options().title || 'RSI', color: series.options().color });
+            });
+            break;
+        case 'BOLL':
+            items.push({ label: 'UP', color: '#ff6b6b' });
+            items.push({ label: 'MID', color: '#4ecdc4' });
+            items.push({ label: 'LOW', color: '#45b7d1' });
+            break;
+    }
+    items.forEach(it => {
+        const el = document.createElement('span');
+        el.className = 'legend-chip';
+        el.style.backgroundColor = it.color || '#999';
+        el.textContent = it.label;
+        container.appendChild(el);
+    });
+}
 // 设置事件监听器
 function setupEventListeners() {
     // 用户选择相关
@@ -95,6 +180,7 @@ function setupEventListeners() {
 
     // 复盘报告
     document.getElementById('view-full-chart-btn').addEventListener('click', viewFullChart);
+    document.getElementById('ai-analyze-btn').addEventListener('click', requestAIAnalysis);
     // document.getElementById('new-training-from-report-btn').addEventListener('click', showTrainingSetup);
     document.getElementById('new-training-from-report-btn').addEventListener('click', () => {
         // 1. 调用全局重置函数，清理一切旧状态
@@ -113,7 +199,7 @@ function setupEventListeners() {
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', function (event) {
         // 只在训练界面激活快捷键
-        if (document.getElementById('training-interface').classList.contains('hidden')) {
+        if (document.getElementById('training-interface').classList.contains('hidden') || isViewOnlyMode) {
             return;
         }
 
@@ -262,7 +348,7 @@ async function createUser() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({username})
+            body: JSON.stringify({ username })
         });
 
         if (response.ok) {
@@ -304,6 +390,13 @@ function selectUser(username) {
     document.getElementById('current-username').textContent = username;
     showMainApp();
     loadUserStatistics();
+
+    // 初始化 AI API 状态
+    fetch(`${API_BASE}/users/${username}/settings`)
+        .then(res => res.json())
+        .then(settings => {
+            updateAIApiStatus(!!settings.enable_ai_api, username);
+        }).catch(e => console.error(e));
 }
 
 async function loadUserStatistics() {
@@ -364,6 +457,7 @@ function resetToMainAppState() {
     if (isPlaying) {
         pausePlayback();
     }
+    stopAutoSync();
 
     // 2. 清理图表对象和数据
     if (chart) {
@@ -424,6 +518,48 @@ function resetToMainAppState() {
     document.getElementById('user-selection').classList.add('hidden');
     document.getElementById('main-app').classList.remove('hidden');
 
+    // Reset view-only mode visually
+    document.querySelectorAll('.trade-controls button').forEach(btn => {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+    });
+    
+    const endBtn = document.getElementById('end-training-btn');
+    if (endBtn) {
+        endBtn.disabled = false;
+        endBtn.style.opacity = '1';
+    }
+
+    const nextBarBtn = document.getElementById('next-bar-btn');
+    if (nextBarBtn) {
+        nextBarBtn.disabled = false;
+        nextBarBtn.style.opacity = '1';
+    }
+    
+    const playPauseBtn = document.getElementById('play-pause-btn');
+    if (playPauseBtn) {
+        playPauseBtn.disabled = false;
+        playPauseBtn.style.opacity = '1';
+    }
+    
+    isViewOnlyMode = false;
+    
+    const backBtn = document.getElementById('back-to-report-btn');
+    if (backBtn) {
+        backBtn.classList.add('hidden');
+    }
+
+    // 清理后端的训练会话
+    if (currentTraining && currentTraining.id) {
+        fetch(`${API_BASE}/training/${currentTraining.id}/cleanup`, { method: 'POST' })
+            .catch(e => console.error('Cleanup failed:', e));
+    }
+    
+    // Clear current report data and training data
+    currentReportData = null;
+    currentTraining = null;
+
     // 7. 确保主界面的工具栏是可见的
     toggleToolbarForTraining(false);
 }
@@ -477,6 +613,51 @@ function showSettings() {
     loadUserSettings();
 }
 
+function renderMaPeriodsEditor() {
+    const container = document.getElementById('ma-periods-editor');
+    if (!container) return;
+    container.innerHTML = '';
+
+    maPeriods.forEach((p, index) => {
+        const tag = document.createElement('div');
+        tag.className = 'ma-period-tag';
+        tag.style.cssText = 'background:#f3f4f6; border:1px solid #d1d5db; border-radius:4px; padding:2px 8px; display:flex; align-items:center; font-size:12px;';
+        tag.innerHTML = `
+            <span style="margin-right:8px; font-weight:bold;">${p}</span>
+            <span class="delete-ma" data-index="${index}" style="cursor:pointer; color:#ef4444; font-weight:bold;">×</span>
+        `;
+        container.appendChild(tag);
+    });
+
+    if (maPeriods.length < 6) {
+        const addBtn = document.createElement('button');
+        addBtn.className = 'btn-add-ma';
+        addBtn.style.cssText = 'background:#e5e7eb; border:none; border-radius:4px; width:24px; height:24px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-weight:bold;';
+        addBtn.textContent = '+';
+        addBtn.onclick = () => {
+            const val = prompt('输入新的均线周期 (如: 60):');
+            if (val && !isNaN(val)) {
+                const p = parseInt(val);
+                if (p > 0 && !maPeriods.includes(p)) {
+                    maPeriods.push(p);
+                    maPeriods.sort((a, b) => a - b);
+                    renderMaPeriodsEditor();
+                }
+            }
+        };
+        container.appendChild(addBtn);
+    }
+
+    // 删除事件
+    container.querySelectorAll('.delete-ma').forEach(btn => {
+        btn.onclick = (e) => {
+            const idx = parseInt(e.target.dataset.index);
+            maPeriods.splice(idx, 1);
+            renderMaPeriodsEditor();
+        };
+    });
+}
+
 function hideSettings() {
     document.getElementById('settings-modal').classList.add('hidden');
 }
@@ -502,6 +683,21 @@ async function loadUserSettings() {
                 adjustmentRadio.checked = true;
             }
         }
+
+        // 加载 AI API 设置
+        if (settings.enable_ai_api !== undefined) {
+            document.getElementById('enable-ai-api').checked = settings.enable_ai_api;
+        } else {
+            document.getElementById('enable-ai-api').checked = false;
+        }
+
+        // 加载MA周期
+        if (settings.ma_periods && Array.isArray(settings.ma_periods)) {
+            maPeriods = [...settings.ma_periods];
+        } else {
+            maPeriods = [5, 10, 20];
+        }
+        renderMaPeriodsEditor();
     } catch (error) {
         console.error('加载用户设置失败:', error);
     }
@@ -516,7 +712,9 @@ async function saveSettings() {
             commission_rate: parseFloat(document.getElementById('commission-rate').value) / 10000,
             min_commission: parseFloat(document.getElementById('min-commission').value),
             stamp_tax_rate: parseFloat(document.getElementById('stamp-tax-rate').value) / 1000,
-            adjustment_mode: document.getElementById('adjustment-mode').value
+            adjustment_mode: document.getElementById('adjustment-mode').value,
+            enable_ai_api: document.getElementById('enable-ai-api').checked,
+            ma_periods: maPeriods
         };
 
         const response = await fetch(`${API_BASE}/users/${currentUser}/settings`, {
@@ -533,6 +731,9 @@ async function saveSettings() {
             if (adjustmentRadio) {
                 adjustmentRadio.checked = true;
             }
+
+            // 更新 AI 接口信息
+            updateAIApiStatus(settings.enable_ai_api, currentUser);
 
             hideSettings();
             alert('设置保存成功');
@@ -561,11 +762,13 @@ function switchTab(tabName) {
 async function startTraining() {
     const isRandomMode = document.querySelector('.tab-btn.active').dataset.tab === 'random';
     const initialCapital = parseFloat(document.getElementById('initial-capital').value);
+    const dataSource = document.getElementById('data-source').value || 'akshare';
 
     let trainingConfig = {
         user: currentUser,
         initial_capital: initialCapital,
-        mode: isRandomMode ? 'random' : 'specified'
+        mode: isRandomMode ? 'random' : 'specified',
+        data_source: dataSource
     };
 
     if (isRandomMode) {
@@ -605,6 +808,8 @@ async function startTraining() {
             setTimeout(() => {
                 nextBar();
             }, 100); // 100毫秒的延时
+
+            startAutoSync();
         } else {
             const error = await response.json();
             alert(error.message || '开始训练失败');
@@ -633,6 +838,11 @@ function initializeChart() {
     infoDisplay.id = 'chart-info-display';
     infoDisplay.className = 'chart-info-display';
     chartContainer.appendChild(infoDisplay);
+
+    const chartLegend = document.createElement('div');
+    chartLegend.id = 'chart-legend';
+    chartLegend.className = 'chart-legend';
+    chartContainer.appendChild(chartLegend);
 
     chart = LightweightCharts.createChart(chartContainer, {
         width: chartContainer.clientWidth,
@@ -692,34 +902,21 @@ function initializeChart() {
         wickDownColor: '#008000',
         borderVisible: true,
     });
+    candlestickSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
     // 添加移动平均线
-    maSeries[5] = chart.addSeries(LightweightCharts.LineSeries, {
-        color: 'rgb(29,33,64)',
-        lineWidth: 1,
-        title: 'MA5',
-        crosshairMarkerVisible: false,
-        priceLineVisible: false,
-        lastValueVisible: false,
+    maPeriods.forEach((p, index) => {
+        maSeries[p] = chart.addSeries(LightweightCharts.LineSeries, {
+            color: maColors[index % maColors.length],
+            lineWidth: 1,
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+        maSeries[p].applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
     });
 
-    maSeries[10] = chart.addSeries(LightweightCharts.LineSeries, {
-        color: '#2816cf',
-        lineWidth: 1,
-        title: 'MA10',
-        crosshairMarkerVisible: false,
-        priceLineVisible: false,
-        lastValueVisible: false,
-    });
-
-    maSeries[20] = chart.addSeries(LightweightCharts.LineSeries, {
-        color: '#ff8103',
-        lineWidth: 1,
-        title: 'MA20',
-        crosshairMarkerVisible: false,
-        priceLineVisible: false,
-        lastValueVisible: false,
-    });
+    renderChartLegend();
 
     // 添加交易标记系列
     tradeMarkerSeries = chart.addSeries(LightweightCharts.LineSeries, {
@@ -729,6 +926,7 @@ function initializeChart() {
         lastValueVisible: false,
         priceLineVisible: false
     });
+    tradeMarkerSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
     // 初始化成交量图表
     const volumeContainer = document.getElementById('volume-chart');
@@ -781,6 +979,11 @@ function initializeChart() {
     infoDisplay_2.id = 'indicator-info-display';
     infoDisplay_2.className = 'chart-info-display';
     indicatorContainer.appendChild(infoDisplay_2);
+
+    const indicatorLegend = document.createElement('div');
+    indicatorLegend.id = 'indicator-legend';
+    indicatorLegend.className = 'chart-legend';
+    indicatorContainer.appendChild(indicatorLegend);
 
     indicatorChart = LightweightCharts.createChart(indicatorContainer, {
         width: indicatorContainer.clientWidth,
@@ -871,7 +1074,7 @@ function initializeChart() {
         seriesData.forEach((dataPoint, index) => {
             // 确保数据点有时间属性
             if (dataPoint.time) {
-                dataMap.set(dataPoint.time, {...dataPoint, index});
+                dataMap.set(dataPoint.time, { ...dataPoint, index });
             }
         });
 
@@ -915,13 +1118,13 @@ function initializeChart() {
         }
 
         // 获取MA数据
-        const ma5Data = param.seriesData.get(maSeries[5]);
-        const ma10Data = param.seriesData.get(maSeries[10]);
-        const ma20Data = param.seriesData.get(maSeries[20]);
         let maHtml = '<div>';
-        if (ma5Data) maHtml += `<span style="color: ${maSeries[5].options().color};">MA5:${ma5Data.value.toFixed(2)} </span>`;
-        if (ma10Data) maHtml += `<span style="color: ${maSeries[10].options().color};">MA10:${ma10Data.value.toFixed(2)} </span>`;
-        if (ma20Data) maHtml += `<span style="color: ${maSeries[20].options().color};">MA20:${ma20Data.value.toFixed(2)} </span>`;
+        maPeriods.forEach(p => {
+            const mData = param.seriesData.get(maSeries[p]);
+            if (mData) {
+                maHtml += `<span style="color: ${maSeries[p].options().color};">MA${p}:${mData.value.toFixed(2)} </span>`;
+            }
+        });
         maHtml += '</div>';
 
         // 获取并显示BOLL指标数据
@@ -934,7 +1137,7 @@ function initializeChart() {
 
             if (upperData && middleData && lowerData) {
                 bollHtml = `
-                    <div style="margin-top: 4px;">
+                    <div id="boll-info-content" style="margin-top: 4px;">
                         <span style="color: ${bollSeries.upper.options().color};">UP:${upperData.value.toFixed(2)} </span>
                         <span style="color: ${bollSeries.middle.options().color};">MID:${middleData.value.toFixed(2)} </span>
                         <span style="color: ${bollSeries.lower.options().color};">LOW:${lowerData.value.toFixed(2)} </span>
@@ -1010,7 +1213,8 @@ function initializeChart() {
                 currentIndicatorSeries.forEach(series => {
                     const rsiData = param.seriesData.get(series);
                     if (rsiData) {
-                        indicatorHtml += `<div style="color: ${series.options().color};">${series.options().title}: ${rsiData.value.toFixed(2)}</div>`;
+                        const titleText = series.rsiTitle || series.options().title || 'RSI';
+                        indicatorHtml += `<div style="color: ${series.options().color};">${titleText}: ${rsiData.value.toFixed(2)}</div>`;
                     }
                 });
                 break;
@@ -1073,7 +1277,8 @@ function initializeChart() {
 async function loadInitialData() {
     // 内部函数，用于执行实际的数据加载尝试
     const attemptToLoad = async () => {
-        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/data`);
+        const maQuery = maPeriods.join(',');
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/data?ma_periods=${maQuery}`);
         if (!response.ok) {
             // 如果响应不成功，直接抛出错误，由外部的catch块处理
             throw new Error(`Server responded with status: ${response.status}`);
@@ -1090,9 +1295,11 @@ async function loadInitialData() {
 
             // 加载移动平均线数据
             if (data.ma_data) {
-                maSeries[5].setData(data.ma_data[5] || []);
-                maSeries[10].setData(data.ma_data[10] || []);
-                maSeries[20].setData(data.ma_data[20] || []);
+                maPeriods.forEach(p => {
+                    if (maSeries[p] && data.ma_data[p]) {
+                        maSeries[p].setData(data.ma_data[p]);
+                    }
+                });
             }
 
             // 更新当前日期和价格信息
@@ -1329,19 +1536,12 @@ async function updateMovingAverages() {
 
         if (data.ma_data) {
             // 只更新最新的数据点
-            const ma5Data = data.ma_data[5];
-            const ma10Data = data.ma_data[10];
-            const ma20Data = data.ma_data[20];
-
-            if (ma5Data && ma5Data.length > 0) {
-                maSeries[5].update(ma5Data[ma5Data.length - 1]);
-            }
-            if (ma10Data && ma10Data.length > 0) {
-                maSeries[10].update(ma10Data[ma10Data.length - 1]);
-            }
-            if (ma20Data && ma20Data.length > 0) {
-                maSeries[20].update(ma20Data[ma20Data.length - 1]);
-            }
+            maPeriods.forEach(p => {
+                const mData = data.ma_data[p];
+                if (maSeries[p] && mData && mData.length > 0) {
+                    maSeries[p].update(mData[mData.length - 1]);
+                }
+            });
         }
     } catch (error) {
         console.error('更新移动平均线失败:', error);
@@ -1361,6 +1561,14 @@ async function loadTechnicalIndicator(indicatorType) {
             chart.removeSeries(bollSeries.middle);
             chart.removeSeries(bollSeries.lower);
             bollSeries = {}; // 清空
+
+            // 立即清除界面残留的 BOLL 标签
+            const bollInfoEl = document.getElementById('boll-info-content');
+            if (bollInfoEl) {
+                bollInfoEl.remove();
+            }
+            
+            renderChartLegend();
         }
 
         // 清除下方指标图表的所有现有系列
@@ -1381,15 +1589,14 @@ async function loadTechnicalIndicator(indicatorType) {
             const response = await fetch(`${API_BASE}/training/${currentTraining.id}/indicators/BOLL`);
             const data = await response.json();
             if (data.type === 'BOLL' && data.data) {
-                const upperData = data.data.map(item => ({time: item.time, value: item.upper}));
-                const middleData = data.data.map(item => ({time: item.time, value: item.middle}));
-                const lowerData = data.data.map(item => ({time: item.time, value: item.lower}));
+                const upperData = data.data.map(item => ({ time: item.time, value: item.upper }));
+                const middleData = data.data.map(item => ({ time: item.time, value: item.middle }));
+                const lowerData = data.data.map(item => ({ time: item.time, value: item.lower }));
 
                 // 在主图表(chart)上添加BOLL线
                 bollSeries.upper = chart.addSeries(LightweightCharts.LineSeries, {
                     color: '#ff6b6b',
                     lineWidth: 2,
-                    title: 'Upper',
                     priceLineVisible: false,
                     crosshairMarkerVisible: false,
                     lastValueVisible: false
@@ -1397,7 +1604,6 @@ async function loadTechnicalIndicator(indicatorType) {
                 bollSeries.middle = chart.addSeries(LightweightCharts.LineSeries, {
                     color: '#4ecdc4',
                     lineWidth: 2,
-                    title: 'Middle',
                     priceLineVisible: false,
                     crosshairMarkerVisible: false,
                     lastValueVisible: false
@@ -1405,7 +1611,6 @@ async function loadTechnicalIndicator(indicatorType) {
                 bollSeries.lower = chart.addSeries(LightweightCharts.LineSeries, {
                     color: '#45b7d1',
                     lineWidth: 2,
-                    title: 'Lower',
                     priceLineVisible: false,
                     crosshairMarkerVisible: false,
                     lastValueVisible: false
@@ -1414,6 +1619,7 @@ async function loadTechnicalIndicator(indicatorType) {
                 bollSeries.upper.setData(upperData);
                 bollSeries.middle.setData(middleData);
                 bollSeries.lower.setData(lowerData);
+                renderChartLegend();
             }
         } else {
             // --- 如果不是BOLL，则按原逻辑在下方图表绘制 ---
@@ -1422,8 +1628,8 @@ async function loadTechnicalIndicator(indicatorType) {
 
             // 根据指标类型创建新的系列 (此部分代码保持不变)
             if (data.type === 'MACD' && data.data) {
-                const difData = data.data.map(item => ({time: item.time, value: item.dif}));
-                const deaData = data.data.map(item => ({time: item.time, value: item.dea}));
+                const difData = data.data.map(item => ({ time: item.time, value: item.dif }));
+                const deaData = data.data.map(item => ({ time: item.time, value: item.dea }));
                 const histogramData = data.data.map(item => ({
                     time: item.time,
                     value: item.histogram,
@@ -1433,7 +1639,6 @@ async function loadTechnicalIndicator(indicatorType) {
                 const difSeries = indicatorChart.addSeries(LightweightCharts.LineSeries, {
                     color: '#ff6b6b',
                     lineWidth: 1,
-                    title: 'DIF',
                     crosshairMarkerVisible: false,
                     priceLineVisible: false,
                     lastValueVisible: false
@@ -1441,69 +1646,73 @@ async function loadTechnicalIndicator(indicatorType) {
                 const deaSeries = indicatorChart.addSeries(LightweightCharts.LineSeries, {
                     color: '#4ecdc4',
                     lineWidth: 1,
-                    title: 'DEA',
                     crosshairMarkerVisible: false,
                     priceLineVisible: false,
                     lastValueVisible: false
                 });
                 const histogramSeries = indicatorChart.addSeries(LightweightCharts.HistogramSeries, {
-                    title: 'MACD',
                     crosshairMarkerVisible: false,
                     priceLineVisible: false,
                     lastValueVisible: false
                 });
+                difSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+                deaSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+                histogramSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
                 currentIndicatorSeries.push(difSeries, deaSeries, histogramSeries);
 
                 difSeries.setData(difData);
                 deaSeries.setData(deaData);
                 histogramSeries.setData(histogramData);
+                renderIndicatorLegend();
 
             } else if (data.type === 'RSI' && data.data && data.periods) {
                 const rsiColors = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#f9c74f', '#90be6d', '#f8961e'];
                 data.periods.forEach((period, index) => {
-                    const rsiData = data.data.map(item => ({time: item.time, value: item[`rsi${period}`]}));
+                    const rsiData = data.data.map(item => ({ time: item.time, value: item[`rsi${period}`] }));
                     const rsiSeries = indicatorChart.addSeries(LightweightCharts.LineSeries, {
                         color: rsiColors[index % rsiColors.length],
                         lineWidth: 1,
-                        title: `RSI(${period})`,
                         crosshairMarkerVisible: false,
                         priceLineVisible: false,
                         lastValueVisible: false,
                     });
+                    rsiSeries.rsiTitle = `RSI(${period})`;
                     currentIndicatorSeries.push(rsiSeries);
                     rsiSeries.setData(rsiData);
+                    rsiSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
                 });
+                renderIndicatorLegend();
 
             } else if (data.type === 'KDJ' && data.data) {
-                const kData = data.data.map(item => ({time: item.time, value: item.k}));
-                const dData = data.data.map(item => ({time: item.time, value: item.d}));
-                const jData = data.data.map(item => ({time: item.time, value: item.j}));
+                const kData = data.data.map(item => ({ time: item.time, value: item.k }));
+                const dData = data.data.map(item => ({ time: item.time, value: item.d }));
+                const jData = data.data.map(item => ({ time: item.time, value: item.j }));
 
                 const kSeries = indicatorChart.addSeries(LightweightCharts.LineSeries, {
                     color: '#ff6b6b',
                     lineWidth: 1,
-                    title: 'K',
                     crosshairMarkerVisible: false
                 });
                 const dSeries = indicatorChart.addSeries(LightweightCharts.LineSeries, {
                     color: '#4ecdc4',
                     lineWidth: 1,
-                    title: 'D',
                     crosshairMarkerVisible: false
                 });
                 const jSeries = indicatorChart.addSeries(LightweightCharts.LineSeries, {
                     color: '#45b7d1',
                     lineWidth: 1,
-                    title: 'J',
                     crosshairMarkerVisible: false
                 });
+                kSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+                dSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
+                jSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
 
                 currentIndicatorSeries.push(kSeries, dSeries, jSeries);
-
                 kSeries.setData(kData);
                 dSeries.setData(dData);
                 jSeries.setData(jData);
+                renderIndicatorLegend();
             }
         }
 
@@ -1528,13 +1737,14 @@ function changeIndicator() {
 async function updateAdjustment() {
     const adjustment = document.querySelector('input[name="adjustment"]:checked').value;
 
+    const maQuery = maPeriods.join(',');
     try {
-        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/adjustment`, {
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/adjustment?ma_periods=${maQuery}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({adjustment})
+            body: JSON.stringify({ adjustment })
         });
 
         if (response.ok) {
@@ -1549,10 +1759,13 @@ async function updateAdjustment() {
 
             // 重新加载移动平均线
             if (data.ma_data) {
-                maSeries[5].setData(data.ma_data[5] || []);
-                maSeries[10].setData(data.ma_data[10] || []);
-                maSeries[20].setData(data.ma_data[20] || []);
+                maPeriods.forEach(p => {
+                    if (maSeries[p]) {
+                        maSeries[p].setData(data.ma_data[p] || []);
+                    }
+                });
             }
+            renderChartLegend();
         }
     } catch (error) {
         console.error('更新复权设置失败:', error);
@@ -1654,12 +1867,12 @@ async function updateAccountInfo() {
 
         // 更新最大可交易数量
         document.getElementById('max-buy-quantity').textContent = account.max_buyable_quantity;
-        if(account.position_summary){
-            let max_sell_qty = account.position_summary.available_shares/100
+        if (account.position_summary) {
+            let max_sell_qty = account.position_summary.available_shares / 100
             document.getElementById('max-sell-quantity').textContent = max_sell_qty;
-            document.getElementById('trade-quantity').max = Math.max(account.max_buyable_quantity,max_sell_qty);
+            document.getElementById('trade-quantity').max = Math.max(account.max_buyable_quantity, max_sell_qty);
         }
-        else{
+        else {
             document.getElementById('max-sell-quantity').textContent = '0';
             document.getElementById('trade-quantity').max = account.max_buyable_quantity;
         }
@@ -1669,6 +1882,53 @@ async function updateAccountInfo() {
 
     } catch (error) {
         console.error('更新账户信息失败:', error);
+    }
+}
+
+// 自动同步状态
+function startAutoSync() {
+    if (autoSyncInterval) clearInterval(autoSyncInterval);
+    lastKnownBarId = null;
+    lastKnownTradeCount = null;
+
+    autoSyncInterval = setInterval(async () => {
+        if (!currentTraining || isPlaying) return;
+
+        const isTrainingInterfaceVisible = !document.getElementById('training-interface').classList.contains('hidden');
+        if (!isTrainingInterfaceVisible) return;
+
+        try {
+            const resp = await fetch(`${API_BASE}/training/${currentTraining.id}/sync_status`);
+            if (resp.status === 404) {
+                stopAutoSync();
+                return;
+            }
+            if (resp.ok) {
+                const data = await resp.json();
+                let needsRefresh = false;
+
+                if (lastKnownBarId !== null && data.current_bar_id !== lastKnownBarId) {
+                    needsRefresh = true;
+                }
+                if (lastKnownTradeCount !== null && data.trade_markers_count !== lastKnownTradeCount) {
+                    needsRefresh = true;
+                }
+
+                if (needsRefresh) {
+                    await loadInitialData();
+                }
+
+                lastKnownBarId = data.current_bar_id;
+                lastKnownTradeCount = data.trade_markers_count;
+            }
+        } catch (e) { }
+    }, 500);
+}
+
+function stopAutoSync() {
+    if (autoSyncInterval) {
+        clearInterval(autoSyncInterval);
+        autoSyncInterval = null;
     }
 }
 
@@ -1780,7 +2040,7 @@ async function forceLiquidatePosition() {
 
                 const sellResponse = await fetch(`${API_BASE}/training/${currentTraining.id}/trade`, {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'sell', quantity: sellQuantity })
                 });
 
@@ -1798,8 +2058,8 @@ async function forceLiquidatePosition() {
 
                 // 卖出后再次检查，如果已经全部卖完，直接成功返回
                 if (account.position_summary.total_shares - availableShares === 0) {
-                     console.log("持仓已全部清空。");
-                     return true;
+                    console.log("持仓已全部清空。");
+                    return true;
                 }
             }
 
@@ -1909,9 +2169,10 @@ function updateReportSummary(parentElement, report) {
     const summaryItems = new Map([
         ['股票代码:', report.stock_code],
         ['训练期间:', `${report.start_date} 至 ${report.end_date}`],
-        ['初始资金:', `¥${report.initial_capital.toLocaleString()}`],
-        ['最终资产:', `¥${report.final_capital.toLocaleString()}`],
-        // 对于需要特殊处理的项，单独处理
+        ['初始资金:', `¥${report.initial_capital.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`],
+        ['最终资产:', `¥${report.final_capital.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`],
+        ['总交易次数:', `${report.total_trades} 次`],
+        ['交易胜率:', `${(report.trade_win_rate || 0).toFixed(2)}%`]
     ]);
 
     parentElement.innerHTML = `
@@ -1937,9 +2198,6 @@ function updateReportSummary(parentElement, report) {
             ${report.total_return.toFixed(2)}%
         </span>`;
     grid.appendChild(totalReturnItem);
-
-    // 其他需要特殊处理的项...
-    // 为了简洁，这里省略了交易次数、胜率等，可以按上面方式添加
 }
 
 
@@ -2005,7 +2263,7 @@ function createTradeDetailsTable(parentElement, tradeDetails) {
         if (!isBuy) {
             totals.totalAmount += trade.amount;
         }
-        else{
+        else {
             totals.totalAmount -= trade.amount;
         }
         totals.totalProfit += profit;
@@ -2025,10 +2283,89 @@ function createTradeDetailsTable(parentElement, tradeDetails) {
 
 
 /**
+ * 请求 AI 智能复盘点评
+ */
+async function requestAIAnalysis() {
+    const aiBtn = document.getElementById('ai-analyze-btn');
+    const originalText = aiBtn.innerHTML;
+    
+    try {
+        aiBtn.disabled = true;
+        aiBtn.innerHTML = '⏳ 正在请求AI分析，请稍候...';
+        
+        const response = await fetch(`${API_BASE}/training/analyze_report`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                report: currentReportData,
+                user: currentUser
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            
+            // Render the AI commentary
+            const reportContent = document.getElementById('report-content');
+            
+            // Check if section already exists
+            let aiSection = document.querySelector('.ai-commentary-section');
+            if (!aiSection) {
+                aiSection = document.createElement('div');
+                aiSection.className = 'ai-commentary-section';
+                // Insert after summary but before details
+                const detailsSection = document.querySelector('.trade-details-section');
+                if (detailsSection) {
+                    reportContent.insertBefore(aiSection, detailsSection);
+                } else {
+                    reportContent.appendChild(aiSection);
+                }
+            }
+            
+            // Format markdown using marked.js if available, otherwise simple formatting
+            let formattedContent = '';
+            if (typeof marked !== 'undefined') {
+                formattedContent = marked.parse(result.ai_commentary);
+            } else {
+                formattedContent = result.ai_commentary.replace(/\n/g, '<br>');
+            }
+            
+            aiSection.innerHTML = `
+                <h3>🤖 AI 复盘点评</h3>
+                <div class="ai-content">${formattedContent}</div>
+            `;
+            
+            // Scroll to the AI section
+            aiSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Hide the button since we got the result
+            aiBtn.classList.add('hidden');
+        } else {
+            const error = await response.json();
+            alert(`AI 分析失败: ${error.error || '未知错误'}`);
+        }
+    } catch (error) {
+        console.error('AI 分析请求失败:', error);
+        alert('网络请求失败，请检查服务连接。');
+    } finally {
+        aiBtn.disabled = false;
+        aiBtn.innerHTML = originalText;
+    }
+}
+
+// 内部变量用于存储当前报告数据
+let currentReportData = null;
+
+/**
  * 主函数：显示完整的报告界面
  * @param {object} report - 包含所有报告数据的对象
  */
 function showReport(report) {
+    // 保存当前报告数据供 AI 分析使用
+    currentReportData = report;
+    
     // 切换界面可见性
     document.getElementById('training-interface').classList.add('hidden');
     document.getElementById('report-interface').classList.remove('hidden');
@@ -2039,6 +2376,9 @@ function showReport(report) {
     // 获取报告内容的容器
     const reportContent = document.getElementById('report-content');
     reportContent.innerHTML = ''; // 清空旧内容
+
+    // 检查用户是否开启了 AI API
+    checkAIStatusAndShowButton();
 
     // 创建并添加摘要和交易详情
     const summarySection = document.createElement('div');
@@ -2051,16 +2391,137 @@ function showReport(report) {
 
     // 将生成好的模块添加到主容器中
     reportContent.appendChild(summarySection);
+
     reportContent.appendChild(detailsSection);
 
     // 更新用户统计
     loadUserStatistics();
 }
 
-function viewFullChart() {
-    // 这里可以实现查看完整走势的功能
-    alert('查看完整走势功能待实现');
+/**
+ * 检查AI状态并显示/隐藏AI分析按钮
+ */
+async function checkAIStatusAndShowButton() {
+    const aiBtn = document.getElementById('ai-analyze-btn');
+    if (!currentUser || !aiBtn) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/users/${currentUser}/settings`);
+        if (response.ok) {
+            const settings = await response.json();
+            if (settings.enable_ai_api) {
+                aiBtn.classList.remove('hidden');
+            } else {
+                aiBtn.classList.add('hidden');
+            }
+        }
+    } catch (e) {
+        console.error('Failed to check AI status:', e);
+    }
 }
+
+async function viewFullChart() {
+    if (!currentTraining && !currentReportData) {
+        alert('找不到训练会话数据，无法查看完整走势');
+        return;
+    }
+    
+    // Use session_id from report data if available, otherwise from currentTraining
+    const trainingId = currentReportData ? currentReportData.session_id : currentTraining.id;
+
+    const maQuery = maPeriods.join(',');
+    try {
+        const response = await fetch(`${API_BASE}/training/${trainingId}/full_data?ma_periods=${maQuery}`);
+        if (!response.ok) {
+            throw new Error('获取完整数据失败');
+        }
+        
+        const data = await response.json();
+        
+        // Hide report interface and show training interface
+        document.getElementById('report-interface').classList.add('hidden');
+        document.getElementById('training-interface').classList.remove('hidden');
+        
+        // Set view-only mode visually
+        document.querySelectorAll('.trade-controls button').forEach(btn => {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        });
+        
+        const endBtn = document.getElementById('end-training-btn');
+        if (endBtn) {
+            endBtn.disabled = true;
+            endBtn.style.opacity = '0.5';
+        }
+
+        const nextBarBtn = document.getElementById('next-bar-btn');
+        if (nextBarBtn) {
+            nextBarBtn.disabled = true;
+            nextBarBtn.style.opacity = '0.5';
+        }
+        
+        const playPauseBtn = document.getElementById('play-pause-btn');
+        if (playPauseBtn) {
+            playPauseBtn.disabled = true;
+            playPauseBtn.style.opacity = '0.5';
+        }
+        
+        // Update chart data
+        if (data.kline_data && data.kline_data.length > 0) {
+            candlestickSeries.setData(data.kline_data);
+            volumeSeries.setData(data.volume_data);
+
+            if (data.ma_data) {
+                maPeriods.forEach(p => {
+                    if (maSeries[p]) {
+                        maSeries[p].setData(data.ma_data[p] || []);
+                    }
+                });
+            }
+            
+            updateTradeMarkers(data.trade_markers || []);
+            
+            // Re-load technical indicators for full range
+            await loadTechnicalIndicator(currentIndicatorType);
+            
+            // Adjust time scale to fit all data
+            chart.timeScale().fitContent();
+        }
+        
+        // Disable global shortcuts for view-only mode
+        isViewOnlyMode = true;
+        
+        // Add a back to report button if it doesn't exist
+        let backBtn = document.getElementById('back-to-report-btn');
+        if (!backBtn) {
+            backBtn = document.createElement('button');
+            backBtn.id = 'back-to-report-btn';
+            backBtn.className = 'btn btn-primary';
+            backBtn.style.width = '100%';
+            backBtn.style.marginTop = '10px';
+            backBtn.textContent = '返回复盘报告';
+            backBtn.onclick = () => {
+                document.getElementById('training-interface').classList.add('hidden');
+                document.getElementById('report-interface').classList.remove('hidden');
+            };
+            
+            // Add it to the training controls section
+            const controlsSection = document.querySelector('.training-controls');
+            if (controlsSection) {
+                controlsSection.appendChild(backBtn);
+            }
+        }
+        backBtn.classList.remove('hidden');
+        
+    } catch (error) {
+        console.error('查看完整走势失败:', error);
+        alert('获取完整走势数据失败');
+    }
+}
+
+// 内部变量用于跟踪是否为只读模式
+let isViewOnlyMode = false;
 
 // 工具函数
 function formatNumber(num) {
@@ -2074,4 +2535,3 @@ function formatCurrency(num) {
 function formatPercent(num) {
     return `${num.toFixed(2)}%`;
 }
-

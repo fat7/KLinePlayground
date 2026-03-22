@@ -1,18 +1,21 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A股K线复盘训练 - 增强版</title>
+    <title>A股K线复盘训练 - AI版</title>
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <link rel="stylesheet" href="css/style_enhanced.css">
     <script src="js/lightweight-charts.standalone.production.js"></script>
 </head>
+
 <body>
     <!-- 用户选择界面 -->
     <div id="user-selection" class="screen">
         <div class="user-selection-container">
             <h1>A股K线复盘训练</h1>
-            <div class="version-badge">增强版 v2.0</div>
+            <div class="version-badge">AI版 v3.0</div>
             <div class="user-list">
                 <h2 style="justify-self: left;">选择用户</h2>
                 <div id="existing-users"></div>
@@ -72,6 +75,33 @@
                         <option value="dynamic_forward" selected>动态前复权</option>
                     </select>
                 </div>
+                <!-- 新增 AI API 开关 -->
+                <div class="form-group checkbox-group" style="display: flex; align-items: center; margin-top: 15px;">
+                    <style>
+                        .checkbox-group input[type="checkbox"] {
+                            width: 18px;
+                            height: 18px;
+                            margin: 0 10px 0 0;
+                            cursor: pointer;
+                        }
+
+                        .checkbox-group label {
+                            margin-bottom: 0;
+                            cursor: pointer;
+                            user-select: none;
+                            font-weight: normal;
+                        }
+                    </style>
+                    <input type="checkbox" id="enable-ai-api">
+                    <label for="enable-ai-api">开启 AI 介入 (开放本地 API 接口至文件)</label>
+                </div>
+                <!-- MA 周期设置 -->
+                <div class="form-group" style="margin-top: 15px;">
+                    <label>均线周期 (最多6个):</label>
+                    <div id="ma-periods-editor" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;">
+                        <!-- 动态渲染 -->
+                    </div>
+                </div>
                 <div class="modal-actions">
                     <button id="save-settings-btn" class="btn btn-primary">保存</button>
                     <button id="cancel-settings-btn" class="btn btn-secondary">取消</button>
@@ -87,7 +117,7 @@
                     <button class="tab-btn active" data-tab="specified">指定模式</button>
                     <button class="tab-btn" data-tab="random">盲盒模式</button>
                 </div>
-                
+
                 <div id="specified-tab" class="tab-content active">
                     <div class="form-group">
                         <label>股票代码:</label>
@@ -98,7 +128,7 @@
                         <input type="date" id="start-date">
                     </div>
                 </div>
-                
+
                 <div id="random-tab" class="tab-content">
                     <div class="form-group">
                         <label>板块筛选:</label>
@@ -118,12 +148,21 @@
                         </select>
                     </div>
                 </div>
-                
+
+                <div class="form-group">
+                    <label>数据源:</label>
+                    <select id="data-source">
+                        <option value="akshare" selected>免费公网方案 (AKShare)</option>
+                        <option value="xtdata">QMT 本地专线 (XTQuant)</option>
+                        <option value="offline">本地离线数据</option>
+                    </select>
+                </div>
+
                 <div class="form-group">
                     <label>初始资金:</label>
                     <input type="number" id="initial-capital" value="100000" min="10000" step="1000">
                 </div>
-                
+
                 <div class="modal-actions">
                     <button id="start-training-btn" class="btn btn-primary">开始训练</button>
                     <button id="cancel-setup-btn" class="btn btn-secondary">取消</button>
@@ -299,7 +338,8 @@
                             <label>交易数量(手):</label>
                             <input type="number" id="trade-quantity" value="1" min="1" max="1">
                             <div class="max-quantity-info">
-                                最大可买: <span id="max-buy-quantity">0</span> 手 最大可卖: <span id="max-sell-quantity">0</span> 手
+                                最大可买: <span id="max-buy-quantity">0</span> 手 最大可卖: <span id="max-sell-quantity">0</span>
+                                手
                             </div>
                         </div>
                         <div class="trade-buttons">
@@ -311,19 +351,24 @@
 
                 <!-- 快捷键提示 -->
                 <div class="shortcut-trigger-container">
-                        <!-- 这是鼠标悬停的触发器 -->
-                        <div class="shortcut-trigger">
-                            <span>快捷键</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                        </div>
+                    <!-- 这是鼠标悬停的触发器 -->
+                    <div class="shortcut-trigger">
+                        <span>快捷键</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="12" y1="16" x2="12" y2="12"></line>
+                            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        </svg>
+                    </div>
 
-                        <!-- 这是悬停时显示的提示内容 (之前叫 shortcut-help ) -->
-                        <div class="shortcut-tooltip">
-                            <div class="shortcut-item"><strong>空格 / 回车</strong>: 下一根K线</div>
-                            <div class="shortcut-item"><strong>B / + / =</strong>: 买入</div>
-                            <div class="shortcut-item"><strong>S / -</strong>: 卖出</div>
-                            <div class="shortcut-item"><strong>数字键</strong>: 设置交易数量</div>
-                        </div>
+                    <!-- 这是悬停时显示的提示内容 (之前叫 shortcut-help ) -->
+                    <div class="shortcut-tooltip">
+                        <div class="shortcut-item"><strong>空格 / 回车</strong>: 下一根K线</div>
+                        <div class="shortcut-item"><strong>B / + / =</strong>: 买入</div>
+                        <div class="shortcut-item"><strong>S / -</strong>: 卖出</div>
+                        <div class="shortcut-item"><strong>数字键</strong>: 设置交易数量</div>
+                    </div>
                 </div>
 
             </div>
@@ -336,13 +381,16 @@
                 <div id="report-content"></div>
                 <div class="report-actions">
                     <button id="view-full-chart-btn" class="btn btn-primary">查看完整走势</button>
+                    <button id="ai-analyze-btn" class="btn btn-info hidden">🤖 AI智能复盘点评</button>
                     <button id="new-training-from-report-btn" class="btn btn-secondary">开始新训练</button>
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- 引入 marked.js 用于解析 Markdown -->
+    <script src="js/marked.min.js"></script>
     <script src="js/main_enhanced.js"></script>
 </body>
-</html>
 
+</html>
