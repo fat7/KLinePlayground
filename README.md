@@ -55,15 +55,12 @@
 这是一个基于 `PyWebView`、`Flask` 和 `Lightweight Charts` 构建的A股K线复盘训练桌面应用。它允许用户在真实的历史行情数据上进行模拟交易，以训练和提升自己的盘感、策略和决策能力。
 
 该应用将Python后端（数据处理、交易逻辑）与现代Web前端（图表展示、用户交互）相结合，提供了一个功能丰富、响应迅速的本地化训练环境。
-<img width="1384" height="861" alt="7f88dd51929c15bc075ef5ad59f6a37f" src="https://github.com/user-attachments/assets/e516c90f-9312-4811-991f-f0852a7dff58" />
-
-<img width="1384" height="861" alt="398ccabd185510598fdd8d6ac5b6ac6f" src="https://github.com/user-attachments/assets/ef5286a0-8ebc-4c73-81ff-9b518a4b3fea" />
-
-<img width="2190" height="895" alt="f1ed3eeba8c49103c8bd6c345fb92a8f" src="https://github.com/user-attachments/assets/7910546f-ffba-4213-a6ef-89793450dee5" />
-
-<img width="1375" height="859" alt="73288681a0dac09c4f72ff8b2f4ecda1" src="https://github.com/user-attachments/assets/ef25345c-284c-47e7-91c0-dde613922065" />
-<img width="1384" height="1016" alt="0133ca6d2b5e005f815033503dd4af57" src="https://github.com/user-attachments/assets/68b91828-df3b-44fc-a932-86c0c08eae0e" />
-<img width="802" height="682" alt="4a4679b7b10223444edbc6cf36b1182f" src="https://github.com/user-attachments/assets/80865a69-40a2-4acc-b9e7-3cdf92fe5a75" />
+ ![show_pic_1](https://github.com/user-attachments/assets/e516c90f-9312-4811-991f-f0852a7dff58)
+ ![show_pic_2](https://github.com/user-attachments/assets/ef5286a0-8ebc-4c73-81ff-9b518a4b3fea)
+ ![show_pic_3](https://github.com/user-attachments/assets/7910546f-ffba-4213-a6ef-89793450dee5)
+ ![show_pic_4](https://github.com/user-attachments/assets/ef25345c-284c-47e7-91c0-dde613922065)
+ ![show_pic_5](https://github.com/user-attachments/assets/68b91828-df3b-44fc-a932-86c0c08eae0e)
+ ![show_pic_6](https://github.com/user-attachments/assets/80865a69-40a2-4acc-b9e7-3cdf92fe5a75)
 
 ---
 
@@ -132,7 +129,7 @@ pip install -r requirements.txt
 ### 离线数据包领取&技术讨论
 | wx群聊 | 小红书群聊 |
 | :---: | :---: |
-| ![ea2273f5f0c9d1b3b9d0cce2102aad02](https://github.com/user-attachments/assets/d676a78d-6e3b-4946-b79a-70d0a0eda815) | ![59c98422eb5f24c57a0945caaf0f5470](https://github.com/user-attachments/assets/6ef688bf-e5e3-4cc5-8528-3ab59abfae19) |
+| <img src="https://github.com/user-attachments/assets/d676a78d-6e3b-4946-b79a-70d0a0eda815" alt="WX QR Code" width="180"> | <img src="https://github.com/user-attachments/assets/6ef688bf-e5e3-4cc5-8528-3ab59abfae19" alt="xhs QR Code" width="180"> |
 
 ### 商业服务 (Commercial Services)
 
