@@ -59,21 +59,14 @@ pip install -r requirements.txt
 
 ---
 
-## 📂 推荐发布文件列表
-
-为了保持项目的整洁与专业，建议在 GitHub 发布时包含以下核心文件（排除临时或未完成的开发文件）：
-
 | 路径 | 说明 |
 | :--- | :--- |
 | `webview_app/` | 桌面版核心程序入口 |
 | `ai_assistant_tester.py` | AI 介入与策略测试工具 |
 | `backend/` | 包含 `app_enhanced.py` 等所有核心逻辑 |
 | `frontend/` | 包含 `index_enhanced.html` 及其 JS/CSS 资源 |
-| `stock_data_em/` | 东方财富/AkShare 数据处理逻辑 |
 | `main_enhanced.py` | CLI/Web 模式启动入口 |
 | `requirements.txt` | 环境依赖列表 |
-| `data/` | (仅保留目录结构或最小化样本数据) |
-| `users/` | (仅保留目录结构，不含个人信息) |
 
 ---
 
