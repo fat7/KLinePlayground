@@ -1,0 +1,9 @@
+flask
+flask-cors
+pandas
+numpy
+pywebview
+akshare
+requests
+openai
+lightweight-charts
