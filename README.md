@@ -1,14 +1,13 @@
 <img width="2752" height="1536" alt="Gemini_Generated_Image_l1lx5ol1lx5ol1lx" src="https://github.com/user-attachments/assets/9da63388-b17e-4235-a691-0e15c03c4fd3" />
 
+# A股K线复盘训练 - PyWebView桌面版
+
+[![支持与服务](https://img.shields.io/badge/Support%20%26%20Services-联系作者-blue?style=for-the-badge )](https://github.com/fat7/KLinePlayground#%E2%9A%99%EF%B8%8F-%E6%94%AF%E6%8C%81%E4%B8%8E%E6%9C%8D%E5%8A%A1 )
 
 一款专为A股投资者设计的专业级K线复盘与模拟交易训练工具。深度模拟真实交易环境，支持动态复权、多维度技术指标及AI辅助点评。
 
 ## 🌟 核心亮点
-
-### 1. PyWebView 桌面版 (`main_pywebview.py`)
-告别浏览器限制，基于 `pywebview` 打造的独立桌面应用。更强的性能、更稳定的本地API连接，提供原生软件般的复盘体验。
-
-### 2. AI 介入测试与智能助理 (`ai_assistant_tester.py`)
+### AI 介入测试与智能助理 (`ai_assistant_tester.py`)
 首创 AI 介入模式。通过独立的 AI 策略测试器，您可以：
 - 接入 AI 模型（如 GPT-4）进行实时行情分析。
 - 自动化执行买入、卖出及观望操作。
@@ -109,11 +108,6 @@ pip install -r requirements.txt
 | `requirements.txt` | 环境依赖列表 |
 
 
-# A股K线复盘训练 - PyWebView桌面版
-
-[![支持与服务](https://img.shields.io/badge/Support%20%26%20Services-联系作者-blue?style=for-the-badge )](https://github.com/fat7/KLinePlayground#%E2%9A%99%EF%B8%8F-%E6%94%AF%E6%8C%81%E4%B8%8E%E6%9C%8D%E5%8A%A1 )
-
-
 ## 📜 开源许可
 
 本项目采用 [MIT License](LICENSE) 开源。
@@ -133,8 +127,7 @@ pip install -r requirements.txt
 ### 离线数据包领取&技术讨论
 | wx群聊 | 小红书群聊 |
 | :---: | :---: |
-| ![ea2273f5f0c9d1b3b9d0cce2102aad02](https://github.com/user-attachments/assets/d676a78d-6e3b-4946-b79a-70d0a0eda815) | ![59c98422eb5f24c57a0945caaf0f5470](https://github.com/user-attachments/assets/6ef688bf-e5e3-4cc5-8528-3ab59abfae19)
- |
+| ![ea2273f5f0c9d1b3b9d0cce2102aad02](https://github.com/user-attachments/assets/d676a78d-6e3b-4946-b79a-70d0a0eda815) | ![59c98422eb5f24c57a0945caaf0f5470](https://github.com/user-attachments/assets/6ef688bf-e5e3-4cc5-8528-3ab59abfae19) |
 
 ### 商业服务 (Commercial Services)
 
