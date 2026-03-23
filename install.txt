@@ -1,0 +1,21 @@
+
+pyinstaller --onefile --noconfirm  --icon=frontend/assets/favicon.ico --name KLineTrainer --add-data='frontend;frontend' --add-data='.venv/Lib/site-packages/akshare;akshare' webview_app/main_pywebview.py
+pyinstaller  --icon=frontend/assets/favicon.ico --name KLineTrainer --add-data='frontend;frontend' --add-data='.venv/Lib/site-packages/akshare;akshare' webview_app/main_pywebview.py
+
+# 确保可行，但是是单文件
+pyinstaller KLineTrainerOneFile.spec
+
+# 带环境的安装器
+# 先将上一步打包好的主应用文件按照以下格式组织：
+# installer_source/
+# ├── setup.py                       # 安装器脚本
+# ├── MicrosoftEdgeWebview2Setup.exe # WebView2 安装程序
+# └── app_files/                     # 将 dist 文件夹重命名为 app_files 并移动到这里
+#     ├── KlineTrainer.exe           # 一定要注意文件名要对的上
+#     ├── base_library.zip
+#     └── ... (其他所有依赖文件)
+# 然后运行
+cd installer_source
+# 最后运行
+pyinstaller Installer.spec
+# pyinstaller --noconfirm --windowed --onefile --name Installer --add-data "MicrosoftEdgeWebview2Setup.exe:." --add-data "app_files:app_files" setup.py
