@@ -62,7 +62,7 @@
 <img width="1375" height="859" alt="73288681a0dac09c4f72ff8b2f4ecda1" src="https://github.com/user-attachments/assets/ef25345c-284c-47e7-91c0-dde613922065" />
 
 ---
--
+
 ## 🛠️ 技术栈
 
 *   **桌面应用框架**: `PyWebView` - 用于将Web前端打包成原生GUI应用。
@@ -130,8 +130,11 @@ pip install -r requirements.txt
 | :---: | :---: |
 | <img src="https://github.com/user-attachments/assets/f7fa53b8-cdb1-4a0c-9677-ce5d0c60c1a7" alt="Alipay QR Code" width="180"> | <img src="https://github.com/user-attachments/assets/955c873f-de30-4496-ac16-9f0b3c2c39c8" alt="WeChat Pay QR Code" width="180"> |
 
-### 离线数据包领取
-![ea2273f5f0c9d1b3b9d0cce2102aad02](https://github.com/user-attachments/assets/d676a78d-6e3b-4946-b79a-70d0a0eda815)
+### 离线数据包领取&技术讨论
+| wx群聊 | 小红书群聊 |
+| :---: | :---: |
+| ![ea2273f5f0c9d1b3b9d0cce2102aad02](https://github.com/user-attachments/assets/d676a78d-6e3b-4946-b79a-70d0a0eda815) | ![59c98422eb5f24c57a0945caaf0f5470](https://github.com/user-attachments/assets/6ef688bf-e5e3-4cc5-8528-3ab59abfae19)
+ |
 
 ### 商业服务 (Commercial Services)
 
