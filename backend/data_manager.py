@@ -128,13 +128,13 @@ class DataManager:
             
             # dataframe转换
             df_raw = pd.DataFrame({
-                'date': raw_dict['time'][xt_code],
-                'open': raw_dict['open'][xt_code],
-                'close': raw_dict['close'][xt_code],
-                'high': raw_dict['high'][xt_code],
-                'low': raw_dict['low'][xt_code],
-                'volume': raw_dict['volume'][xt_code],
-                'amount': raw_dict['amount'][xt_code]
+                'date': raw_dict['time'].T[xt_code],
+                'open': raw_dict['open'].T[xt_code],
+                'close': raw_dict['close'].T[xt_code],
+                'high': raw_dict['high'].T[xt_code],
+                'low': raw_dict['low'].T[xt_code],
+                'volume': raw_dict['volume'].T[xt_code],
+                'amount': raw_dict['amount'].T[xt_code]
             })
             
             if df_raw.empty:
@@ -142,8 +142,8 @@ class DataManager:
                 return False
                 
             # 重命名列并格式化时间
-            df_raw['date'] = df_raw['date'].astype(str).str[:8]
-            df_raw['date'] = pd.to_datetime(df_raw['date'], format='%Y%m%d').dt.strftime('%Y-%m-%d')
+            df_raw['date'] = df_raw['date'].astype(str).str[:13]
+            df_raw['date'] = pd.to_datetime(df_raw['date'], unit='ms').dt.tz_localize('UTC').dt.tz_convert('Asia/Shanghai').dt.strftime('%Y-%m-%d')
             
             # 获取前复权数据以计算复权因子
             adj_dict = xtdata.get_market_data(
