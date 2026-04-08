@@ -129,7 +129,7 @@ pip install -r requirements.txt
 ### 离线数据包领取&技术讨论
 | wx群聊 | 小红书群聊 |
 | :---: | :---: |
-| <img src="d0b245270a2116567dfd0a8d3fa0d633.jpg" alt="WX QR Code" width="180"> | |
+| <img src="9fcb0d95ea984f63f1f6ffa5ff7cfe66.jpg" alt="WX QR Code" width="180"> | |
 
 ### 商业服务 (Commercial Services)
 
