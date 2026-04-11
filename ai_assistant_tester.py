@@ -96,6 +96,10 @@ class AIInterventionTesterApp:
             self.entry_bar_count.delete(0, tk.END)
             self.entry_bar_count.insert(0, str(data.get("bar_count", 80)))
             
+            self.var_indicator_enabled.set(data.get("include_indicator", False))
+            self.var_indicator_type.set(data.get("indicator_type", "MACD"))
+            self.var_chip.set(data.get("include_chip", False))
+            
             self.text_strategy.delete("1.0", tk.END)
             self.text_strategy.insert(tk.END, data.get("strategy", ""))
         except Exception as e:
@@ -112,6 +116,9 @@ class AIInterventionTesterApp:
             "api_key": self.entry_api_key.get().strip(),
             "model": self.entry_model.get().strip(),
             "bar_count": bar_count,
+            "include_indicator": self.var_indicator_enabled.get(),
+            "indicator_type": self.var_indicator_type.get(),
+            "include_chip": self.var_chip.get(),
             "strategy": self.text_strategy.get("1.0", tk.END).strip()
         }
         json_str = json.dumps(data)
@@ -204,6 +211,22 @@ class AIInterventionTesterApp:
         strategy_frame = ttk.LabelFrame(tab_config, text="交易策略设定 (Strategy Prompt)", padding=(10, 10))
         strategy_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
+        
+        options_frame = ttk.Frame(strategy_frame)
+        options_frame.pack(fill="x", pady=5)
+        
+        self.var_indicator_enabled = tk.BooleanVar(value=True)
+        self.chk_indicator = ttk.Checkbutton(options_frame, text="附加技术指标:", variable=self.var_indicator_enabled)
+        self.chk_indicator.pack(side="left", padx=(5, 2))
+        
+        self.var_indicator_type = tk.StringVar(value="MACD")
+        self.cmb_indicator = ttk.Combobox(options_frame, textvariable=self.var_indicator_type, values=["MACD", "KDJ", "RSI", "BOLL"], width=6, state="readonly")
+        self.cmb_indicator.pack(side="left", padx=(0, 15))
+        
+        self.var_chip = tk.BooleanVar(value=True)
+        self.chk_chip = ttk.Checkbutton(options_frame, text="附加最新一期筹码分布数据", variable=self.var_chip)
+        self.chk_chip.pack(side="left", padx=15)
+
         ttk.Label(strategy_frame, text="请在这里使用自然语言描述您希望 AI 遵守的交易策略或筛选条件。\n它将被融合进分析请求的 System 提示词中，用于指导 AI 动作。").pack(anchor="w", pady=2)
         
         self.text_strategy = scrolledtext.ScrolledText(strategy_frame, width=60, height=8, font=("Microsoft YaHei", 9))
@@ -352,16 +375,45 @@ class AIInterventionTesterApp:
                 bar_count = 80
                 
             recent_klines = kline_list[-bar_count:]
+            
+            # 附加 Indicator 或 筹码 等状态数据
+            indicator_data = {}
+            if self.var_indicator_enabled.get():
+                indicator_type = self.var_indicator_type.get()
+                try:
+                    ind_resp = requests.get(f"{self.base_url}/training/{self.training_id}/indicators/{indicator_type}")
+                    if ind_resp.status_code == 200:
+                        ind_list = ind_resp.json().get('data', [])
+                        # 同步提取同等数量的最后 bar_count 根记录
+                        recent_ind = ind_list[-bar_count:] if ind_list else []
+                        for m in recent_ind:
+                            vals_dict = {k: round(v, 3) for k, v in m.items() if k not in ('time', 'bar_id', 'is_preview')}
+                            indicator_data[m['time']] = vals_dict
+                except Exception as e:
+                    pass
+
+            chip_desc = ""
+            if self.var_chip.get():
+                try:
+                    chip_resp = requests.get(f"{self.base_url}/training/{self.training_id}/chip_distribution?bins=80")
+                    if chip_resp.status_code == 200:
+                        chips = chip_resp.json().get('data', [])
+                        chip_desc = f"【当前筹码分布状态】全集筹码柱(价格:交易量): {', '.join([f'{c['price']:0.2f}:{c['volume']:0.2f}' for c in chips[-20:]])} (列出了分布图最高区域的顶端或随机截面)。\n\n"
+                except Exception as e:
+                    pass
+
             context_data = []
             for k in recent_klines:
                 import datetime
                 dtStr = datetime.datetime.fromtimestamp(k['time']).strftime('%Y-%m-%d')
-                context_data.append({
+                bar_dict = {
                     "Date": dtStr,
                     "Open": round(k['open'], 2), "High": round(k['high'], 2), 
                     "Low": round(k['low'], 2), "Close": round(k['close'], 2)
-                })
-                
+                }
+                if k['time'] in indicator_data:
+                    bar_dict.update(indicator_data[k['time']])
+                context_data.append(bar_dict)                
             current_bar = context_data[-1]
             stock_name = data_json.get('stock_name', '未知')
             
@@ -380,12 +432,14 @@ class AIInterventionTesterApp:
             prompt += f"总持仓：{current_qty}股 (依据T+1规则，今日真正能够卖出的股数为：{available_qty}股)\n\n"
             
             prompt += f"【盘面数据】最近 {bar_count} 根日K线：\n{json.dumps(context_data, ensure_ascii=False, indent=2)}\n\n"
+            if chip_desc:
+                prompt += chip_desc
             prompt += f"【提示视窗】今日为 {current_bar['Date']}，当天最终收盘价：{current_bar['Close']}。\n\n"
             
             prompt += "【决策输出要求】务必结合策略、持仓与趋势情况进行评判，纯JSON回复格式如下：\n"
             prompt += '{"action": "sell/buy/next", "quantity": 100, "reason": "你的思考与抉择流"}\n\n'
-            prompt += "- buy=买入开仓, quantity为100的整数倍；\n"
-            prompt += "- sell=卖出平仓, 数量不得超过上述的【可卖出股数】；\n"
+            prompt += "- buy=买入开仓, quantity向下取整为100的整数倍, 单位（股）；\n"
+            prompt += "- sell=卖出平仓, 单位（股）, 数量不得超过上述的【可卖出股数】；\n"
             prompt += "- hold=保持观望 / next=空仓无聊直接推翻至下一天。 (二者均使quantity失效)。\n"
             
             self._update_log("🚀 数据及用户策略参数已注入，向大模型中心传输推理请求...", "highlight")
@@ -404,7 +458,7 @@ class AIInterventionTesterApp:
                 "stream": False
             }
             
-            resp = requests.post(llm_url, headers=headers, json=payload, timeout=900)
+            resp = requests.post(llm_url, headers=headers, json=payload, timeout=10000)
             if resp.status_code != 200:
                 self._update_log(f"网络阻断 (Status: {resp.status_code}) - {resp.text}", "error")
                 self.auto_mode = False

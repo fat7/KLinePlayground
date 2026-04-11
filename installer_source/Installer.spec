@@ -5,7 +5,7 @@ a = Analysis(
     ['setup.py'],
     pathex=[],
     binaries=[],
-    datas=[('MicrosoftEdgeWebview2Setup.exe', '.'), ('app_files', 'app_files')],
+    datas=[('MicrosoftEdgeWebview2Setup.exe', '.'), ('app_files', 'app_files'), ('data', 'data')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

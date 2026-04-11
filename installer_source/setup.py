@@ -184,6 +184,11 @@ def main_install():
         else:
              messagebox.showerror("错误", "找不到应用文件，安装包可能已损坏。")
              return
+             
+        # 复制数据文件
+        source_data_files = get_resource_path("data")
+        if os.path.exists(source_data_files):
+            shutil.copytree(source_data_files, data_path, dirs_exist_ok=True)
 
     except Exception as e:
         messagebox.showerror("安装错误", f"创建文件或目录时发生错误: {e}")
@@ -201,7 +206,7 @@ def main_install():
         # AI 策略测试器快捷方式
         ai_tester_exe = os.path.join(bin_path, "KLineTrainer_AI策略测试器.exe")
         if os.path.exists(ai_tester_exe):
-            ai_shortcut_file = os.path.join(desktop_path, f"{APP_NAME}_AI策略测试器.lnk")
+            ai_shortcut_file = os.path.join(desktop_path, f"{APP_NAME}_AI_Assistant.lnk")
             create_shortcut(ai_tester_exe, ai_shortcut_file)
             
     except Exception as e:

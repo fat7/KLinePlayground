@@ -194,7 +194,11 @@ def _update_api_info(user=None, enable=None):
         print(f"写入 ai_api_info.json 失败: {e}")
 
 def get_ai_config():
-    config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', '.ai_tester_config.enc')
+    if getattr(sys, 'frozen', False):
+        config_file = os.path.join(os.path.dirname(sys.executable), '..', 'data', '.ai_tester_config.enc')
+    else:
+        config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', '.ai_tester_config.enc')
+        
     if not os.path.exists(config_file):
         return None
     try:
@@ -444,7 +448,8 @@ def next_bar(training_id):
             'finished': False,
             'new_bar': current_bar,
             'new_volume': kline_processor.get_current_volume(),
-            'progress': kline_processor.get_progress()
+            'progress': kline_processor.get_progress(),
+            'requires_full_refresh': getattr(kline_processor, 'factor_changed', False)
         }
 
         color = '#000000'
@@ -604,6 +609,21 @@ def get_account_info(training_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/training/<training_id>/trade_records', methods=['GET'])
+def get_trade_records(training_id):
+    """获取最新交易记录明细"""
+    try:
+        if training_id not in active_trainings:
+            return jsonify({'error': '训练会话不存在'}), 404
+        
+        training = active_trainings[training_id]
+        trade_simulator = training['trade_simulator']
+        
+        records = trade_simulator.get_trade_history_with_bar_id()
+        return jsonify(records)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/training/<training_id>/indicators/<indicator_type>', methods=['GET'])
 def get_technical_indicators(training_id, indicator_type):
     """获取技术指标数据"""
@@ -614,7 +634,17 @@ def get_technical_indicators(training_id, indicator_type):
         training = active_trainings[training_id]
         kline_processor = training['kline_processor']
         
-        indicators = kline_processor.get_technical_indicators(indicator_type.upper())
+        # 获取用户自定义的技术指标参数
+        user = training['user']
+        user_config = user_manager.get_user_config(user)
+        kwargs = {}
+        if user_config and 'settings' in user_config and 'indicators' in user_config['settings']:
+            ind_settings = user_config['settings']['indicators']
+            ind_type_lower = indicator_type.lower()
+            if ind_type_lower in ind_settings:
+                kwargs = ind_settings[ind_type_lower]
+                
+        indicators = kline_processor.get_technical_indicators(indicator_type.upper(), **kwargs)
         return jsonify(indicators)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -736,6 +766,23 @@ def get_training_history(training_id):
             'progress': progress,
             'trade_markers': kline_processor.get_trade_markers()
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/training/<training_id>/chip_distribution', methods=['GET'])
+def get_chip_distribution(training_id):
+    """获取筹码分布（换手率衰减模型）"""
+    try:
+        if training_id not in active_trainings:
+            return jsonify({'error': '训练会话不存在'}), 404
+            
+        kline_processor = active_trainings[training_id]['kline_processor']
+        
+        # 可选增加 bins 参数，如果前端要求更精细的分布
+        bins = int(request.args.get('bins', 80))
+        chip_dist = kline_processor.get_volume_profile(bins=bins)
+        
+        return jsonify(chip_dist)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

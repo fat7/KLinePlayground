@@ -138,6 +138,7 @@ class KLineProcessorEnhanced:
                 'high': float(row['high']),
                 'low': float(row['low']),
                 'close': float(row['close']),
+                'volume': float(row['volume']),
                 'bar_id': bar_id,
                 'is_preview': bar_id <= 0  # 标记是否为预览数据
             })
@@ -286,8 +287,15 @@ class KLineProcessorEnhanced:
     
     def next_bar(self) -> bool:
         """推进到下一根K线"""
+        self.factor_changed = False
         if self.current_index < self.max_index:
+            old_factor = self.full_data.iloc[self.current_index]['factor']
+            
             self.current_index += 1
+            
+            new_factor = self.full_data.iloc[self.current_index]['factor']
+            if old_factor != new_factor and self.adjustment_mode == 'dynamic_forward':
+                self.factor_changed = True
             
             # 检查是否跨越了除权除息日，如果是则可能需要重新计算复权价格
             self._check_dividend_adjustment()
@@ -368,25 +376,26 @@ class KLineProcessorEnhanced:
                 'high': float(row['high']),
                 'low': float(row['low']),
                 'close': float(row['close']),
+                'volume': float(row['volume']),
                 'bar_id': bar_id,
                 'is_preview': bar_id <= 0
             })
         
         return chart_data
     
-    def get_technical_indicators(self, indicator_type: str = 'MACD') -> Dict:
+    def get_technical_indicators(self, indicator_type: str = 'MACD', **kwargs) -> Dict:
         """计算技术指标"""
         visible_data = self.full_data.iloc[:self.current_index + 1].copy()
         adjusted_data = self._calculate_adjusted_prices(visible_data, self.adjustment_mode)
         
         if indicator_type == 'MACD':
-            return self._calculate_macd(adjusted_data['close'])
+            return self._calculate_macd(adjusted_data['close'], **kwargs)
         elif indicator_type == 'KDJ':
-            return self._calculate_kdj(adjusted_data['high'], adjusted_data['low'], adjusted_data['close'])
+            return self._calculate_kdj(adjusted_data['high'], adjusted_data['low'], adjusted_data['close'], **kwargs)
         elif indicator_type == 'RSI':
-            return self._calculate_rsi(adjusted_data['close'])
+            return self._calculate_rsi(adjusted_data['close'], **kwargs)
         elif indicator_type == 'BOLL':
-            return self._calculate_boll(adjusted_data['close'])
+            return self._calculate_boll(adjusted_data['close'], **kwargs)
         else:
             return {}
     
@@ -542,3 +551,83 @@ class KLineProcessorEnhanced:
         except Exception as e:
             print(f"计算BOLL失败: {e}")
             return {'type': 'BOLL', 'data': []}
+
+    def get_volume_profile(self, bins=80) -> Dict:
+        """
+        计算当前K线及之前的筹码分布（换手率衰减模型）。
+        使用字典收集每个价格区间的交易量，并随时间推进衰减历史筹码。
+        """
+        try:
+            visible_data = self.full_data.iloc[:self.current_index + 1].copy()
+            if visible_data.empty:
+                return {'type': 'CHIP', 'data': []}
+                
+            adjusted_data = self._calculate_adjusted_prices(visible_data, self.adjustment_mode)
+            
+            # 由于可能没有真实的换手率数据，我们使用一种基于成交量的相对衰减模型
+            avg_vol = adjusted_data['volume'].mean()
+            virtual_total_shares = avg_vol * 120 if avg_vol > 0 else 1
+            
+            import numpy as np
+            chip_map = {}
+            for i, row in adjusted_data.iterrows():
+                vol = float(row['volume'])
+                high = float(row['high'])
+                low = float(row['low'])
+                
+                # 计算当日或当根K线的换手率（估算）
+                if 'turnover' in row and not pd.isna(row['turnover']):
+                    tr = float(row['turnover']) / 100.0
+                else:
+                    tr = min(vol / virtual_total_shares, 1.0)
+                
+                # 历史筹码衰减
+                keys_to_delete = []
+                for price in chip_map.keys():
+                    chip_map[price] *= (1 - tr)
+                    # 清理过小的筹码碎片
+                    if chip_map[price] < 1e-5:
+                        keys_to_delete.append(price)
+                for k in keys_to_delete:
+                    del chip_map[k]
+                
+                # 将当日筹码按价格区间分布 (简单平均分布到10个小区间)
+                if high == low:
+                    chip_map[high] = chip_map.get(high, 0) + vol
+                else:
+                    prices = np.linspace(low, high, num=10)
+                    vol_per_price = vol / 10
+                    for p in prices:
+                        chip_map[p] = chip_map.get(p, 0) + vol_per_price
+            
+            if not chip_map:
+                return {'type': 'CHIP', 'data': []}
+                
+            min_p = min(chip_map.keys())
+            max_p = max(chip_map.keys())
+            
+            if min_p == max_p:
+                return {'type': 'CHIP', 'data': [{'price': min_p, 'volume': sum(chip_map.values())}]}
+                
+            step = (max_p - min_p) / bins
+            binned_chips = {}
+            
+            for price, volume in chip_map.items():
+                bin_idx = int((price - min_p) / step)
+                if bin_idx >= bins:
+                    bin_idx = bins - 1
+                bin_price = min_p + (bin_idx + 0.5) * step
+                binned_chips[bin_price] = binned_chips.get(bin_price, 0) + volume
+                
+            result_data = [{'price': round(p, 2), 'volume': round(v, 2)} for p, v in binned_chips.items() if v > 0]
+            result_data.sort(key=lambda x: x['price'])
+            
+            return {
+                'type': 'CHIP',
+                'data': result_data
+            }
+        except Exception as e:
+            print(f"计算筹码分布失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'type': 'CHIP', 'data': []}

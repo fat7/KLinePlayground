@@ -1155,3 +1155,24 @@ body {
     color: #87e8de; /* 给快捷键本身一个高亮颜色 */
     margin-right: 8px;
 }
+
+/* 筹码峰叠加容器 */
+#volume-profile-container {
+    position: absolute;
+    top: 0;
+    right: 55px; /* 取决于右侧坐标轴宽度，一般 Lightweight Charts 默认大约 50-60px */
+    bottom: 0;
+    width: 250px; /* 筹码峰最大宽度 */
+    pointer-events: none; /* 让鼠标事件穿透到底层图表 */
+    z-index: 5;
+    overflow: hidden;
+}
+
+.chip-bar {
+    position: absolute;
+    right: 0;
+    background-color: rgba(41, 98, 255, 0.25);
+    border-left: 1px solid rgba(41, 98, 255, 0.4);
+    pointer-events: none;
+    transition: width 0.2s ease, top 0.2s ease, height 0.2s ease;
+}

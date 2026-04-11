@@ -98,8 +98,47 @@
                 <!-- MA 周期设置 -->
                 <div class="form-group" style="margin-top: 15px;">
                     <label>均线周期 (最多6个):</label>
-                    <div id="ma-periods-editor" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;">
+                    <div id="ma-periods-editor"
+                        style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;">
                         <!-- 动态渲染 -->
+                    </div>
+                </div>
+
+                <!-- 其他技术指标参数设置 -->
+                <div class="form-group" style="margin-top: 15px; border-top: 1px solid #e9ecef; padding-top: 15px;">
+                    <label style="font-weight: bold; margin-bottom: 8px;">技术指标参数</label>
+
+                    <div style="margin-bottom: 8px;">
+                        <label>MACD (快, 慢, 信号):</label>
+                        <div style="display:flex; gap:6px;">
+                            <input type="number" id="macd-fast" value="12" min="1" max="100" style="width: 60px;">
+                            <input type="number" id="macd-slow" value="26" min="1" max="200" style="width: 60px;">
+                            <input type="number" id="macd-signal" value="9" min="1" max="100" style="width: 60px;">
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 8px;">
+                        <label>KDJ (N, M1, M2):</label>
+                        <div style="display:flex; gap:6px;">
+                            <input type="number" id="kdj-n" value="9" min="1" max="100" style="width: 60px;">
+                            <input type="number" id="kdj-m1" value="3" min="1" max="50" style="width: 60px;">
+                            <input type="number" id="kdj-m2" value="3" min="1" max="50" style="width: 60px;">
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 8px;">
+                        <label>RSI 周期 (逗号分隔):</label>
+                        <input type="text" id="rsi-periods" value="6,12,24" placeholder="例如: 6,12,24"
+                            style="width: 200px;">
+                    </div>
+
+                    <div>
+                        <label>BOLL (周期, 标准差):</label>
+                        <div style="display:flex; gap:6px;">
+                            <input type="number" id="boll-period" value="20" min="1" max="200" style="width: 60px;">
+                            <input type="number" id="boll-std-dev" value="2" min="0.1" step="0.1" max="10"
+                                style="width: 60px;">
+                        </div>
                     </div>
                 </div>
                 <div class="modal-actions">
@@ -240,12 +279,17 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="setting-group" style="margin-top: 10px;">
+                            <label>
+                                <input type="checkbox" id="toggle-chip-distribution"> 显示筹码分布(换手率衰减模型)
+                            </label>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- 中间图表区域 -->
-            <div class="chart-container">
+            <div class="chart-container" style="position: relative;">
                 <div class="chart-header">
                     <div class="stock-info">
                         <span id="stock-name">股票名称</span>
@@ -314,6 +358,10 @@
                         <div class="detail-item">
                             <span>成交量:</span>
                             <span id="volume">--</span>
+                        </div>
+                        <div class="detail-item">
+                            <span>筹码获利比例:</span>
+                            <span id="profit-ratio">--</span>
                         </div>
                         <div class="detail-item">
                             <span>涨跌幅:</span>

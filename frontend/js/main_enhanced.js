@@ -20,6 +20,124 @@ let lastKnownTradeCount = null;
 let maPeriods = [5, 10, 20]; // 默认MA周期
 const maColors = ['#1d2140', '#2816cf', '#ff8103', '#e02424', '#8b5cf6', '#059669']; // 6个预设颜色
 
+// --- 筹码分布开始 ---
+let chipDistributionData = null;
+
+async function updateChipDistribution() {
+    const toggleCb = document.getElementById('toggle-chip-distribution');
+    if (!toggleCb || !toggleCb.checked) {
+        const container = getOrCreateVolumeProfileContainer();
+        if (container) container.style.display = 'none';
+        return;
+    }
+
+    if (!currentTraining || !currentTraining.id) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/chip_distribution?bins=80`);
+        if (response.ok) {
+            chipDistributionData = await response.json();
+            renderChipDistribution();
+        }
+    } catch (e) {
+        console.error("Failed to load chip distribution", e);
+    }
+}
+
+function renderChipDistribution() {
+    const toggleCb = document.getElementById('toggle-chip-distribution');
+    if (!toggleCb || !toggleCb.checked) {
+        return;
+    }
+    const container = getOrCreateVolumeProfileContainer();
+    container.style.display = 'block';
+    
+    if (!chipDistributionData || !chipDistributionData.data || !candlestickSeries || !chart) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const data = chipDistributionData.data;
+    if (data.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    // 计算获利盘比例
+    const currentData = candlestickSeries.data();
+    if (currentData.length > 0) {
+        const currentPrice = currentData[currentData.length - 1].close;
+        let profitVolume = 0;
+        let totalVolume = 0;
+        data.forEach(bin => {
+            totalVolume += bin.volume;
+            if (bin.price < currentPrice) profitVolume += bin.volume;
+        });
+        const profitRatioEl = document.getElementById('profit-ratio');
+        if (profitRatioEl) {
+            const profitRatio = totalVolume > 0 ? ((profitVolume / totalVolume) * 100).toFixed(2) : 0;
+            profitRatioEl.textContent = `${profitRatio}%`;
+            profitRatioEl.style.color = profitRatio > 50 ? '#ff4d4f' : '#008000';
+        }
+    }
+
+    const maxVolume = Math.max(...data.map(d => d.volume));
+    const fragment = document.createDocumentFragment();
+    
+    data.forEach((bin, i) => {
+        const y = candlestickSeries.priceToCoordinate(bin.price);
+        if (y === null || y < -50 || y > container.clientHeight + 50) {
+            return; 
+        }
+        
+        let nextY = null;
+        if (i < data.length - 1) {
+            nextY = candlestickSeries.priceToCoordinate(data[i+1].price);
+        } else if (i > 0) {
+            const prevY = candlestickSeries.priceToCoordinate(data[i-1].price);
+            if (y !== null && prevY !== null) {
+                nextY = y - (prevY - y);
+            }
+        }
+        
+        let barHeight = 2;
+        if (y !== null && nextY !== null) {
+            barHeight = Math.abs(y - nextY);
+        }
+        if (barHeight < 1) barHeight = 1;
+        
+        const widthPercent = (bin.volume / maxVolume) * 100;
+        
+        const barDiv = document.createElement('div');
+        barDiv.className = 'chip-bar';
+        barDiv.style.top = `${y - barHeight/2}px`;
+        barDiv.style.width = `${widthPercent}%`;
+        barDiv.style.height = `${barHeight * 0.9}px`;
+        
+        fragment.appendChild(barDiv);
+    });
+    
+    container.innerHTML = '';
+    container.appendChild(fragment);
+}
+
+function getOrCreateVolumeProfileContainer() {
+    let container = document.getElementById('volume-profile-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'volume-profile-container';
+        const chartDiv = document.getElementById('chart');
+        if (chartDiv) {
+             if (window.getComputedStyle(chartDiv).position === 'static') {
+                 chartDiv.style.position = 'relative';
+             }
+             chartDiv.appendChild(container);
+        }
+    }
+    return container;
+}
+// --- 筹码分布结束 ---
+
 // API 基础URL - 改为相对路径适配动态端口
 const API_BASE = '/api';
 
@@ -178,6 +296,9 @@ function setupEventListeners() {
     // 技术指标选择
     document.getElementById('indicator-select')?.addEventListener('change', changeIndicator);
 
+    // 筹码分布切换
+    document.getElementById('toggle-chip-distribution')?.addEventListener('change', updateChipDistribution);
+
     // 复盘报告
     document.getElementById('view-full-chart-btn').addEventListener('click', viewFullChart);
     document.getElementById('ai-analyze-btn').addEventListener('click', requestAIAnalysis);
@@ -266,6 +387,8 @@ function resizeCharts() {
         chart.resize(chartContainer.clientWidth, chartContainer.clientHeight);
         volumeChart.resize(volumeContainer.clientWidth, volumeContainer.clientHeight);
         indicatorChart.resize(indicatorContainer.clientWidth, indicatorContainer.clientHeight);
+        
+        renderChipDistribution();
     }
 }
 
@@ -698,6 +821,28 @@ async function loadUserSettings() {
             maPeriods = [5, 10, 20];
         }
         renderMaPeriodsEditor();
+
+        // 加载指标配置
+        if (settings.indicators) {
+            const ind = settings.indicators;
+            if (ind.macd) {
+                document.getElementById('macd-fast').value = ind.macd.fast || 12;
+                document.getElementById('macd-slow').value = ind.macd.slow || 26;
+                document.getElementById('macd-signal').value = ind.macd.signal || 9;
+            }
+            if (ind.kdj) {
+                document.getElementById('kdj-n').value = ind.kdj.n || 9;
+                document.getElementById('kdj-m1').value = ind.kdj.m1 || 3;
+                document.getElementById('kdj-m2').value = ind.kdj.m2 || 3;
+            }
+            if (ind.rsi && ind.rsi.periods) {
+                document.getElementById('rsi-periods').value = ind.rsi.periods.join(',');
+            }
+            if (ind.boll) {
+                document.getElementById('boll-period').value = ind.boll.period || 20;
+                document.getElementById('boll-std-dev').value = ind.boll.std_dev || 2;
+            }
+        }
     } catch (error) {
         console.error('加载用户设置失败:', error);
     }
@@ -707,6 +852,28 @@ async function saveSettings() {
     if (!currentUser) return;
 
     try {
+        // 收集指标参数
+        const indicators = {
+            macd: {
+                fast: parseInt(document.getElementById('macd-fast').value) || 12,
+                slow: parseInt(document.getElementById('macd-slow').value) || 26,
+                signal: parseInt(document.getElementById('macd-signal').value) || 9
+            },
+            kdj: {
+                n: parseInt(document.getElementById('kdj-n').value) || 9,
+                m1: parseInt(document.getElementById('kdj-m1').value) || 3,
+                m2: parseInt(document.getElementById('kdj-m2').value) || 3
+            },
+            rsi: {
+                periods: document.getElementById('rsi-periods').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n))
+            },
+            boll: {
+                period: parseInt(document.getElementById('boll-period').value) || 20,
+                std_dev: parseFloat(document.getElementById('boll-std-dev').value) || 2
+            }
+        };
+        if (indicators.rsi.periods.length === 0) indicators.rsi.periods = [6, 12, 24];
+
         const settings = {
             default_initial_capital: parseInt(document.getElementById('default-initial-capital').value, 10),
             commission_rate: parseFloat(document.getElementById('commission-rate').value) / 10000,
@@ -714,7 +881,8 @@ async function saveSettings() {
             stamp_tax_rate: parseFloat(document.getElementById('stamp-tax-rate').value) / 1000,
             adjustment_mode: document.getElementById('adjustment-mode').value,
             enable_ai_api: document.getElementById('enable-ai-api').checked,
-            ma_periods: maPeriods
+            ma_periods: maPeriods,
+            indicators: indicators
         };
 
         const response = await fetch(`${API_BASE}/users/${currentUser}/settings`, {
@@ -802,6 +970,7 @@ async function startTraining() {
             showTrainingInterface();
             initializeChart();
             await loadInitialData();
+            await updateChipDistribution(); // 加入此行，初始化筹码分布
 
             // 在所有内容加载完毕后，自动触发一次 nextBar
             // 我们加一个小的延时，确保图表渲染完成，视觉效果更平滑
@@ -864,6 +1033,7 @@ function initializeChart() {
         },
         rightPriceScale: {
             borderColor: '#e9ecef',
+            minimumWidth: 80,
         },
         // 使用 localization 选项来格式化十字标线的时间
         localization: {
@@ -949,6 +1119,7 @@ function initializeChart() {
         },
         rightPriceScale: {
             borderColor: '#e9ecef',
+            minimumWidth: 80,
         },
         timeScale: {
             borderColor: '#e9ecef',
@@ -1002,6 +1173,7 @@ function initializeChart() {
         },
         rightPriceScale: {
             borderColor: '#e9ecef',
+            minimumWidth: 80,
         },
         timeScale: {
             borderColor: '#e9ecef',
@@ -1019,6 +1191,11 @@ function initializeChart() {
             volumeChart.timeScale().setVisibleLogicalRange(timeRange);
             indicatorChart.timeScale().setVisibleLogicalRange(timeRange);
         }
+        renderChipDistribution();
+    });
+    
+    chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+        renderChipDistribution();
     });
 
     // 监听成交量图表的时间轴变化
@@ -1375,11 +1552,43 @@ function updateCurrentInfo(barData, progress) {
     document.getElementById('low-price').textContent = `¥${barData.low.toFixed(2)}`;
     document.getElementById('close-price').textContent = `¥${barData.close.toFixed(2)}`;
 
-    // 计算涨跌幅（使用前日收盘价）
+    // 更新成交量
+    if (barData.volume !== undefined) {
+        let volText = barData.volume;
+        if (volText >= 100000000) {
+            volText = (volText / 100000000).toFixed(2) + '亿';
+        } else if (volText >= 10000) {
+            volText = (volText / 10000).toFixed(2) + '万';
+        } else {
+            volText = volText.toString();
+        }
+        document.getElementById('volume').textContent = volText;
+    } else {
+        document.getElementById('volume').textContent = `--`;
+    }
+
+    // 计算涨跌幅（优先使用后端的lastClose，其次退化到图表的前一根的数据）
     if (progress && progress.current_bar_id > 1) {
-        const changePercent = ((barData.close - barData.lastClose) / barData.lastClose * 100).toFixed(2);
-        document.getElementById('change-percent').textContent = `${changePercent}%`;
-        document.getElementById('change-percent').style.color = changePercent > 0 ? '#ff4d4f' : changePercent < 0 ? '#008000' : '#000000';
+        let prevClose = barData.lastClose;
+        if (prevClose === undefined) {
+            // 如果后端没有传lastClose，则尝试从本地的K线图表获取最后第二根数据的收盘价
+            const localData = candlestickSeries.data();
+            if (localData && localData.length >= 2) {
+                prevClose = localData[localData.length - 2].close;
+            }
+        }
+        
+        if (prevClose !== undefined && prevClose > 0) {
+            const changePercent = ((barData.close - prevClose) / prevClose * 100).toFixed(2);
+            document.getElementById('change-percent').textContent = `${changePercent}%`;
+            document.getElementById('change-percent').style.color = changePercent > 0 ? '#ff4d4f' : changePercent < 0 ? '#008000' : '#000000';
+        } else {
+            document.getElementById('change-percent').textContent = `--%`;
+            document.getElementById('change-percent').style.color = '#000000';
+        }
+    } else {
+        document.getElementById('change-percent').textContent = `--%`;
+        document.getElementById('change-percent').style.color = '#000000';
     }
 
     // 更新进度信息
@@ -1502,7 +1711,10 @@ async function nextBar() {
                 // 更新图表数据
                 if (data.new_bar) {
                     candlestickSeries.update(data.new_bar);
-                    updateAdjustment();
+                    
+                    if (data.requires_full_refresh) {
+                        await updateAdjustment();
+                    }
 
                     // 更新成交量数据，支持颜色
                     if (data.new_volume) {
@@ -1510,6 +1722,14 @@ async function nextBar() {
                     }
 
                     updateCurrentInfo(data.new_bar, data.progress);
+                    
+                    // 防止自动同步机制触发多余的全量刷新
+                    if (data.progress && data.progress.current_bar_id !== undefined) {
+                        lastKnownBarId = data.progress.current_bar_id;
+                    }
+
+                    // 更新筹码分布
+                    updateChipDistribution();
 
                     // 更新移动平均线
                     await updateMovingAverages();
@@ -1739,6 +1959,8 @@ async function updateAdjustment() {
 
     const maQuery = maPeriods.join(',');
     try {
+        const visibleRange = chart.timeScale().getVisibleLogicalRange();
+        
         const response = await fetch(`${API_BASE}/training/${currentTraining.id}/adjustment?ma_periods=${maQuery}`, {
             method: 'POST',
             headers: {
@@ -1766,6 +1988,12 @@ async function updateAdjustment() {
                 });
             }
             renderChartLegend();
+            
+            if (visibleRange !== null) {
+                chart.timeScale().setVisibleLogicalRange(visibleRange);
+            }
+            
+            updateChipDistribution();
         }
     } catch (error) {
         console.error('更新复权设置失败:', error);
@@ -1809,6 +2037,9 @@ async function executeBuy() {
             updateAccountInfo();
             addTradeRecord(result.trade);
             updateTradeMarkers(result.trade_markers);
+            if (result.trade_markers) {
+                lastKnownTradeCount = result.trade_markers.length;
+            }
         } else {
             const error = await response.json();
             alert(error.message || '买入失败');
@@ -1880,8 +2111,50 @@ async function updateAccountInfo() {
         // 更新持仓信息
         updatePositionInfo(account.position_summary);
 
+        // 同步拉取交易记录（解决 AI / 后台自动交易所缺失的面板历史记录）
+        await updateTradeHistory();
+
     } catch (error) {
         console.error('更新账户信息失败:', error);
+    }
+}
+
+// 获取并刷新整个交易历史列表
+async function updateTradeHistory() {
+    try {
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/trade_records`);
+        if (!response.ok) return;
+        const records = await response.json();
+        
+        const container = document.getElementById('trade-history');
+        if (!records || records.length === 0) {
+            container.innerHTML = '<div class="no-trades">暂无交易记录</div>';
+            return;
+        }
+
+        container.innerHTML = '';
+        // 倒序排列，新的在上面
+        const displayRecords = records.reverse().slice(0, 10);
+        
+        displayRecords.forEach(trade => {
+            const tradeItem = document.createElement('div');
+            tradeItem.className = `trade-item ${trade.action}`;
+            tradeItem.innerHTML = `
+                <div class="trade-header">
+                    <span class="trade-action">${trade.action === 'buy' ? '买入' : '卖出'}</span>
+                    <span class="trade-time">${trade.trade_date}</span>
+                </div>
+                <div class="trade-details">
+                    <div>Bar ID: ${trade.bar_id}</div>
+                    <div>数量: ${trade.quantity} 手</div>
+                    <div>价格: ¥${trade.price.toFixed(2)}</div>
+                    <div>金额: ¥${trade.net_amount.toFixed(2)}</div>
+                </div>
+            `;
+            container.appendChild(tradeItem);
+        });
+    } catch (e) {
+        console.error('获取交易历史失败', e);
     }
 }
 
@@ -1967,36 +2240,8 @@ function updatePositionInfo(positionSummary) {
 }
 
 function addTradeRecord(trade) {
-    const container = document.getElementById('trade-history');
-
-    // 如果是第一条记录，清除"暂无交易记录"
-    if (container.querySelector('.no-trades')) {
-        container.innerHTML = '';
-    }
-
-    const tradeItem = document.createElement('div');
-    tradeItem.className = `trade-item ${trade.action}`;
-    tradeItem.innerHTML = `
-        <div class="trade-header">
-            <span class="trade-action">${trade.action === 'buy' ? '买入' : '卖出'}</span>
-            <span class="trade-time">${trade.trade_date}</span>
-        </div>
-        <div class="trade-details">
-            <div>Bar ID: ${trade.bar_id}</div>
-            <div>数量: ${trade.quantity} 手</div>
-            <div>价格: ¥${trade.price.toFixed(2)}</div>
-            <div>金额: ¥${trade.net_amount.toFixed(2)}</div>
-        </div>
-    `;
-
-    // 插入到顶部
-    container.insertBefore(tradeItem, container.firstChild);
-
-    // 限制显示的记录数量
-    const items = container.querySelectorAll('.trade-item');
-    if (items.length > 10) {
-        container.removeChild(items[items.length - 1]);
-    }
+    // 改为直接调用全量更新
+    updateTradeHistory();
 }
 
 // 训练控制
