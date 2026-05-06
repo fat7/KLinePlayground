@@ -6522,3 +6522,6 @@
 /scratch_sync_test/
 /kline_web_backend/
 /kline_web_frontend/
+__pycache__/
+*.pyc
+*.pyo
