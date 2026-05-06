@@ -6516,3 +6516,9 @@
 /stock_data_em/
 /dist/
 /build/
+/data/
+/installer_source/
+/scratch_sync_range_test/
+/scratch_sync_test/
+/kline_web_backend/
+/kline_web_frontend/
