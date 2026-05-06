@@ -6525,3 +6525,9 @@
 __pycache__/
 *.pyc
 *.pyo
+*.db
+*.sqlite
+*.sqlite3
+*.exe
+*.7z
+chart_render_temp.html
