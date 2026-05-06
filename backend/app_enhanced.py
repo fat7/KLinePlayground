@@ -292,6 +292,7 @@ def start_training():
         user = data.get('user')
         mode = data.get('mode')
         data_source = data.get('data_source', 'akshare')
+        period = data.get('period', 'daily')
         initial_capital = data.get('initial_capital', 100000)
         
         if not user:
@@ -303,8 +304,18 @@ def start_training():
         if mode == 'random':
             # 随机模式
             sector = data.get('sector', 'all')
-            year_range = data.get('year_range', '2020-2024')
-            stock_code, start_date = data_manager.get_random_stock(sector, year_range, source=data_source)
+            date_start = data.get('date_start', '2024-01-01')
+            date_end = data.get('date_end', '2026-01-01')
+            try:
+                stock_code, start_date = data_manager.get_random_stock(
+                    sector,
+                    date_start,
+                    date_end,
+                    source=data_source,
+                    interval=period,
+                )
+            except ValueError as e:
+                return jsonify({'error': str(e)}), 400
         else:
             # 指定模式
             stock_code = data.get('stock_code')
@@ -314,11 +325,17 @@ def start_training():
                 return jsonify({'error': '股票代码和起始日期不能为空'}), 400
         
         # 验证股票代码和日期
-        if not data_manager.validate_stock_and_date(stock_code, start_date, source=data_source):
-            return jsonify({'error': '无效的股票代码或日期'}), 400
+        validation_error = data_manager.get_training_validation_error(
+            stock_code,
+            start_date,
+            source=data_source,
+            interval=period,
+        )
+        if validation_error:
+            return jsonify({'error': validation_error}), 400
         
         # 创建增强版K线处理器和交易模拟器
-        kline_processor = KLineProcessorEnhanced(data_manager, stock_code, start_date, source=data_source)
+        kline_processor = KLineProcessorEnhanced(data_manager, stock_code, start_date, source=data_source, interval=period)
         trade_simulator = TradeSimulatorEnhanced(user, initial_capital, stock_code)
         
         # 获取用户设置并应用到交易模拟器
@@ -339,6 +356,8 @@ def start_training():
             'kline_processor': kline_processor,
             'trade_simulator': trade_simulator,
             'mode': mode,
+            'data_source': data_source,
+            'period': period,
             'created_at': datetime.now()
         }
         
@@ -348,8 +367,12 @@ def start_training():
             'id': training_id,
             'stock_code': stock_code,
             'start_date': start_date,
-            'mode': mode
+            'mode': mode,
+            'data_source': data_source,
+            'period': period
         })
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -362,10 +385,11 @@ def get_training_data(training_id):
         
         training = active_trainings[training_id]
         kline_processor = training['kline_processor']
+        view_period = request.args.get('view_period', 'daily')
         
         # 获取当前可见的K线数据
-        kline_data = kline_processor.get_visible_data()
-        volume_data = kline_processor.get_volume_data()
+        kline_data = kline_processor.get_visible_data(view_period=view_period)
+        volume_data = kline_processor.get_volume_data(view_period=view_period)
         
         # 获取均线周期参数
         ma_periods_str = request.args.get('ma_periods', '5,10,20')
@@ -374,7 +398,7 @@ def get_training_data(training_id):
         except ValueError:
             ma_periods = [5, 10, 20]
             
-        ma_data = kline_processor.get_ma_data(ma_periods)
+        ma_data = kline_processor.get_ma_data(ma_periods, view_period=view_period)
         
         # 获取股票名称
         stock_name = data_manager.get_stock_name(training['stock_code'])
@@ -388,7 +412,10 @@ def get_training_data(training_id):
             'volume_data': volume_data,
             'ma_data': ma_data,
             'progress': progress,
-            'trade_markers': kline_processor.get_trade_markers()
+            'trade_markers': kline_processor.get_trade_markers() if view_period == 'daily' else [],
+            'period': training.get('period', 'daily'),
+            'view_period': view_period,
+            'data_source': training.get('data_source', 'akshare')
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -473,6 +500,7 @@ def update_adjustment(training_id):
         
         data = request.get_json()
         adjustment = data.get('adjustment', 'none')
+        view_period = request.args.get('view_period', 'daily')
         
         training = active_trainings[training_id]
         kline_processor = training['kline_processor']
@@ -488,9 +516,9 @@ def update_adjustment(training_id):
             ma_periods = [5, 10, 20]
             
         # 重新获取数据
-        kline_data = kline_processor.get_visible_data()
-        volume_data = kline_processor.get_volume_data()
-        ma_data = kline_processor.get_ma_data(ma_periods)
+        kline_data = kline_processor.get_visible_data(view_period=view_period)
+        volume_data = kline_processor.get_volume_data(view_period=view_period)
+        ma_data = kline_processor.get_ma_data(ma_periods, view_period=view_period)
         
         return jsonify({
             'kline_data': kline_data,
@@ -511,8 +539,9 @@ def get_full_data(training_id):
         
         training = active_trainings[training_id]
         kline_processor = training['kline_processor']
+        view_period = request.args.get('view_period', 'daily')
         
-        kline_data = kline_processor.get_full_data()
+        kline_data = kline_processor.get_full_data(view_period=view_period)
         
         # 获取均线周期参数
         ma_periods_str = request.args.get('ma_periods', '5,10,20')
@@ -532,8 +561,8 @@ def get_full_data(training_id):
         kline_processor.current_index = kline_processor.max_index
         
         try:
-            volume_data = kline_processor.get_volume_data()
-            ma_data = kline_processor.get_ma_data(ma_periods)
+            volume_data = kline_processor.get_volume_data(view_period=view_period)
+            ma_data = kline_processor.get_ma_data(ma_periods, view_period=view_period)
         finally:
             # Restore state
             kline_processor.current_index = original_index
@@ -542,7 +571,10 @@ def get_full_data(training_id):
             'kline_data': kline_data,
             'volume_data': volume_data,
             'ma_data': ma_data,
-            'trade_markers': kline_processor.get_trade_markers()
+            'trade_markers': kline_processor.get_trade_markers() if view_period == 'daily' else [],
+            'period': training.get('period', 'daily'),
+            'view_period': view_period,
+            'data_source': training.get('data_source', 'akshare')
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -557,6 +589,7 @@ def execute_trade(training_id):
         data = request.get_json()
         action = data.get('action')  # 'buy' or 'sell'
         quantity = data.get('quantity')
+        price_type = data.get('price_type', 'close')
         
         if not action or not quantity:
             return jsonify({'error': '交易参数不完整'}), 400
@@ -567,7 +600,7 @@ def execute_trade(training_id):
         
         # 获取当前价格
         current_bar = kline_processor.get_current_bar()
-        current_price = current_bar['close']
+        current_price = current_bar['open'] if price_type == 'open' else current_bar['close']
         current_date = kline_processor.get_current_date()
         
         # 执行交易
@@ -633,6 +666,7 @@ def get_technical_indicators(training_id, indicator_type):
         
         training = active_trainings[training_id]
         kline_processor = training['kline_processor']
+        view_period = request.args.get('view_period', 'daily')
         
         # 获取用户自定义的技术指标参数
         user = training['user']
@@ -644,7 +678,7 @@ def get_technical_indicators(training_id, indicator_type):
             if ind_type_lower in ind_settings:
                 kwargs = ind_settings[ind_type_lower]
                 
-        indicators = kline_processor.get_technical_indicators(indicator_type.upper(), **kwargs)
+        indicators = kline_processor.get_technical_indicators(indicator_type.upper(), view_period=view_period, **kwargs)
         return jsonify(indicators)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -777,12 +811,62 @@ def get_chip_distribution(training_id):
             return jsonify({'error': '训练会话不存在'}), 404
             
         kline_processor = active_trainings[training_id]['kline_processor']
+        view_period = request.args.get('view_period', 'daily')
         
         # 可选增加 bins 参数，如果前端要求更精细的分布
         bins = int(request.args.get('bins', 80))
-        chip_dist = kline_processor.get_volume_profile(bins=bins)
+        chip_dist = kline_processor.get_volume_profile(bins=bins, view_period=view_period)
         
         return jsonify(chip_dist)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/data/sources', methods=['GET'])
+def get_data_sources():
+    """返回可选数据源与可用性。"""
+    try:
+        return jsonify({'sources': data_manager.get_available_sources()})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/data/stock_universe', methods=['GET'])
+def get_stock_universe():
+    """按市场返回股票代码列表，供批量补数使用。"""
+    try:
+        market = request.args.get('market', 'all')
+        stock_codes = data_manager.get_stock_universe(market=market)
+        return jsonify({
+            'market': market,
+            'count': len(stock_codes),
+            'stock_codes': stock_codes
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/data/sync', methods=['POST'])
+def sync_offline_data():
+    """使用在线数据源增量补充离线数据。"""
+    try:
+        data = request.get_json() or {}
+        stock_code = (data.get('stock_code') or '').strip()
+        source = data.get('source', 'akshare')
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        force_full = bool(data.get('force_full', False))
+
+        if not stock_code:
+            return jsonify({'error': '股票代码不能为空'}), 400
+        if source == 'offline':
+            return jsonify({'error': '请先选择在线数据源'}), 400
+
+        result = data_manager.sync_offline_data(
+            stock_code=stock_code,
+            source=source,
+            start_date=start_date,
+            end_date=end_date,
+            force_full=force_full,
+        )
+        return jsonify(result)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -822,4 +906,3 @@ if __name__ == '__main__':
     
     # 启动Flask应用
     app.run(host='0.0.0.0', port=5000, debug=True)
-

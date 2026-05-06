@@ -1,543 +1,409 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+import base64
 import json
 import os
-import requests
-import threading
-import base64
-
-try:
-    import ctypes
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)
-except Exception:
-    pass
-
+import socket
 import sys
+import threading
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime
+from pathlib import Path
 
-# 告诉 Windows 这是一个独立的应用程序，而不是 python/tk 的子进程
-# 这可以修复任务栏图标显示为 tk 默认图标的问题
-try:
-    myappid = 'klinetrainer.aitester.1.0'
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-except Exception:
-    pass
+import requests
+import webview
+from flask import Flask, jsonify, request
 
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    application_path = os.path.dirname(sys.executable)
-    # 针对 PyInstaller 单文件打包，资源文件会被解压到 sys._MEIPASS
-    bundle_dir = sys._MEIPASS
-else:
-    application_path = os.path.dirname(os.path.abspath(__file__))
-    bundle_dir = application_path
-
-# 因为安装后 exe 在 bin 目录下，所以 data 目录在上一级
-if getattr(sys, 'frozen', False):
-    data_dir = os.path.join(application_path, '..', 'data')
-else:
-    data_dir = os.path.join(application_path, 'data')
-
-CONFIG_FILE = os.path.join(data_dir, '.ai_tester_config.enc')
+CONFIG_FILE_NAME = ".ai_tester_config.enc"
 CRYPT_KEY = "kline_trainer_secret_key"
 
-def _xor_crypt(text, key=CRYPT_KEY):
-    return "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(text))
 
-class AIInterventionTesterApp:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("KLine Trainer AI 策略测试客户端 V1.0")
-        
-        icon_path = os.path.join(bundle_dir, 'ai_assistant.ico')
-        if os.path.exists(icon_path):
-            root.iconbitmap(default=icon_path)
-        else:
-            # 强烈建议加上这行打印！如果打包时忘记加 --add-data，它会在这里提醒你，而不是默默变成小羽毛
-            print(f"警告: 找不到图标文件 {icon_path}")
-        
-        self.root.geometry("800x650")
+def _xor_crypt(text: str, key: str = CRYPT_KEY) -> str:
+    return "".join(chr(ord(char) ^ ord(key[index % len(key)])) for index, char in enumerate(text))
 
-        # 风格设置
-        style = ttk.Style()
-        if 'clam' in style.theme_names():
-            style.theme_use('clam')
-        
-        style.configure("TButton", padding=6, font=("Microsoft YaHei", 9))
-        style.configure("Primary.TButton", font=("Microsoft YaHei", 9, "bold"))
-        style.configure("TLabel", font=("Microsoft YaHei", 9))
-        style.configure("TNotebook.Tab", font=("Microsoft YaHei", 9, "bold"), padding=[10, 5])
-        
-        # 内部状态
-        self.api_info = None
-        self.base_url = ""
-        self.training_id = ""
-        self.auto_mode = False
-        
-        self.create_widgets()
-        self.load_config()
-        
-    def load_config(self):
-        if not os.path.exists(CONFIG_FILE): return
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                obfs = f.read().strip()
-            if not obfs: return
-            json_str = _xor_crypt(base64.b64decode(obfs).decode('utf-8'))
-            data = json.loads(json_str)
-            
-            self.entry_base_url.delete(0, tk.END)
-            self.entry_base_url.insert(0, data.get("base_url", "https://api.openai.com/v1"))
-            
-            self.entry_api_key.delete(0, tk.END)
-            self.entry_api_key.insert(0, data.get("api_key", ""))
-            
-            self.entry_model.delete(0, tk.END)
-            self.entry_model.insert(0, data.get("model", "gpt-3.5-turbo"))
-            
-            self.entry_bar_count.delete(0, tk.END)
-            self.entry_bar_count.insert(0, str(data.get("bar_count", 80)))
-            
-            self.var_indicator_enabled.set(data.get("include_indicator", False))
-            self.var_indicator_type.set(data.get("indicator_type", "MACD"))
-            self.var_chip.set(data.get("include_chip", False))
-            
-            self.text_strategy.delete("1.0", tk.END)
-            self.text_strategy.insert(tk.END, data.get("strategy", ""))
-        except Exception as e:
-            self.log(f"读取配置失败: {e}", "error")
 
-    def save_config(self):
-        try:
-            bar_count = int(self.entry_bar_count.get().strip())
-        except ValueError:
-            bar_count = 80
-            
-        data = {
-            "base_url": self.entry_base_url.get().strip(),
-            "api_key": self.entry_api_key.get().strip(),
-            "model": self.entry_model.get().strip(),
-            "bar_count": bar_count,
-            "include_indicator": self.var_indicator_enabled.get(),
-            "indicator_type": self.var_indicator_type.get(),
-            "include_chip": self.var_chip.get(),
-            "strategy": self.text_strategy.get("1.0", tk.END).strip()
+def get_runtime_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent
+
+
+def get_project_root() -> Path:
+    base_dir = get_runtime_base_dir()
+    if getattr(sys, "frozen", False):
+        return base_dir
+    return base_dir
+
+
+def get_bundle_base() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+
+def get_frontend_dir() -> Path:
+    return get_bundle_base() / "webview_app" / "ai_tester_frontend"
+
+
+def get_data_dir() -> Path:
+    return get_project_root() / "data"
+
+
+def get_api_info_path() -> Path:
+    return get_data_dir() / "ai_api_info.json"
+
+
+def get_config_path() -> Path:
+    return get_data_dir() / CONFIG_FILE_NAME
+
+
+def load_config() -> dict:
+    config_path = get_config_path()
+    if not config_path.exists():
+        return {
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "",
+            "model": "gpt-4o-mini",
+            "bar_count": 80,
+            "include_indicator": True,
+            "indicator_type": "MACD",
+            "include_chip": True,
+            "strategy": "",
         }
-        json_str = json.dumps(data)
-        obfs = base64.b64encode(_xor_crypt(json_str).encode('utf-8')).decode('utf-8')
+
+    try:
+        obfs = config_path.read_text(encoding="utf-8").strip()
+        if not obfs:
+            return {}
+        json_str = _xor_crypt(base64.b64decode(obfs).decode("utf-8"))
+        return json.loads(json_str)
+    except Exception as exc:
+        return {"error": f"读取配置失败: {exc}"}
+
+
+def save_config(config: dict):
+    config_path = get_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    json_str = json.dumps(config, ensure_ascii=False)
+    obfs = base64.b64encode(_xor_crypt(json_str).encode("utf-8")).decode("utf-8")
+    config_path.write_text(obfs, encoding="utf-8")
+
+
+def load_api_info() -> dict:
+    info_path = get_api_info_path()
+    if not info_path.exists():
+        raise FileNotFoundError(f"未找到 {info_path}")
+    return json.loads(info_path.read_text(encoding="utf-8"))
+
+
+def normalize_connect_info() -> dict:
+    info = load_api_info()
+    base_url = info.get("api_base_url", "").rstrip("/")
+    trainings = info.get("active_trainings", [])
+    training_id = trainings[0] if trainings else ""
+    return {
+        "status": "connected" if base_url else "error",
+        "base_url": base_url,
+        "training_id": training_id,
+        "trainings": trainings,
+        "current_user": info.get("current_user", ""),
+        "updated_at": info.get("updated_at", ""),
+        "message": "已连接主程序" if base_url else "ai_api_info.json 缺少 API 地址",
+    }
+
+
+def _append_log(logs, message, level="info"):
+    logs.append({"level": level, "message": message})
+
+
+def force_next_internal(base_url: str, training_id: str) -> dict:
+    next_url = f"{base_url}/training/{training_id}/next"
+    response = requests.post(next_url, timeout=30)
+    payload = response.json()
+    if response.status_code != 200:
+        raise RuntimeError(payload.get("error", "推进失败"))
+    return payload
+
+
+def build_prompt(config: dict, data_json: dict, account_json: dict) -> tuple[str, str]:
+    kline_list = data_json.get("kline_data", [])
+    bar_count = int(config.get("bar_count", 80) or 80)
+    bar_count = max(20, min(80, bar_count))
+    recent_klines = kline_list[-bar_count:]
+
+    indicator_data = {}
+    chip_desc = ""
+    connect = normalize_connect_info()
+    base_url = connect["base_url"]
+    training_id = connect["training_id"]
+
+    if config.get("include_indicator"):
+        indicator_type = config.get("indicator_type", "MACD")
         try:
-            os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-            with open(CONFIG_FILE, 'w') as f:
-                f.write(obfs)
-        except Exception as e:
-            self.log(f"保存配置失败: {e}", "error")
+            response = requests.get(f"{base_url}/training/{training_id}/indicators/{indicator_type}", timeout=30)
+            if response.status_code == 200:
+                indicator_list = response.json().get("data", [])
+                recent_indicator = indicator_list[-bar_count:] if indicator_list else []
+                for item in recent_indicator:
+                    indicator_data[item["time"]] = {
+                        key: round(value, 3)
+                        for key, value in item.items()
+                        if key not in ("time", "bar_id", "is_preview") and isinstance(value, (int, float))
+                    }
+        except Exception:
+            pass
 
-    def create_widgets(self):
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        # --- TAB 1: 运行控制台 ---
-        tab_console = ttk.Frame(notebook)
-        notebook.add(tab_console, text="🕹️ 运行与控制台")
-        
-        # 顶部连接面板
-        conn_frame = ttk.LabelFrame(tab_console, text="主程序连接", padding=(10, 5))
-        conn_frame.pack(fill="x", padx=10, pady=10)
-        
-        self.btn_connect = ttk.Button(conn_frame, text="🔄 刷新并读取接口状态", command=self.connect_to_trainer)
-        self.btn_connect.grid(row=0, column=0, rowspan=2, padx=5, pady=5)
-        
-        self.lbl_status = ttk.Label(conn_frame, text="状态：尚未连接", foreground="gray")
-        self.lbl_status.grid(row=0, column=1, sticky="w", padx=10)
-        
-        self.lbl_info = ttk.Label(conn_frame, text="会话：无", foreground="gray")
-        self.lbl_info.grid(row=1, column=1, sticky="w", padx=10)
-        
-        # AI 控制面板
-        ctrl_frame = ttk.LabelFrame(tab_console, text="AI 测试执行", padding=(10, 10))
-        ctrl_frame.pack(fill="x", padx=10, pady=5)
-        
-        self.btn_analyze = tk.Button(ctrl_frame, text="🧠 单步分析并打单", command=self.start_ai_analysis, bg="#e6f7ff", font=("Microsoft YaHei", 9), relief="groove")
-        self.btn_analyze.pack(side="left", padx=5)
-        
-        self.btn_auto = tk.Button(ctrl_frame, text="▶ 开启自动沉浸测试 (Auto Mode)", command=self.toggle_auto_mode, bg="#f6ffed", font=("Microsoft YaHei", 9), relief="groove")
-        self.btn_auto.pack(side="left", padx=5)
-        
-        self.btn_next = tk.Button(ctrl_frame, text="⏭️ 强行下一天 (Next)", command=self.force_next, bg="#fffbe6", font=("Microsoft YaHei", 9), relief="groove")
-        self.btn_next.pack(side="right", padx=5)
-        
-        # 日志区
-        log_frame = ttk.Frame(tab_console)
-        log_frame.pack(fill="both", expand=True, padx=10, pady=5)
-        
-        ttk.Label(log_frame, text="实时执行日志:").pack(anchor="w")
-        
-        self.log_text = scrolledtext.ScrolledText(log_frame, width=60, height=15, state="disabled", font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4")
-        self.log_text.pack(fill="both", expand=True, pady=2)
-        
-        # 定义日志标签颜色
-        self.log_text.tag_config("info", foreground="#d4d4d4")
-        self.log_text.tag_config("success", foreground="#4ec9b0")
-        self.log_text.tag_config("error", foreground="#f44747")
-        self.log_text.tag_config("highlight", foreground="#ce9178")
-        self.log_text.tag_config("ai", foreground="#569cd6")
-        
-        # --- TAB 2: 配置中心 ---
-        tab_config = ttk.Frame(notebook)
-        notebook.add(tab_config, text="⚙️ AI 及策略配置")
-        
-        # LLM 设置
-        llm_frame = ttk.LabelFrame(tab_config, text="大语言模型 (LLM) 接口设定", padding=(10, 10))
-        llm_frame.pack(fill="x", padx=10, pady=10)
-        
-        ttk.Label(llm_frame, text="Base URL:").grid(row=0, column=0, sticky="e", pady=5)
-        self.entry_base_url = ttk.Entry(llm_frame, width=50)
-        self.entry_base_url.insert(0, "https://api.openai.com/v1")
-        self.entry_base_url.grid(row=0, column=1, pady=5, sticky="w")
-        
-        ttk.Label(llm_frame, text="API Key:").grid(row=1, column=0, sticky="e", pady=5)
-        self.entry_api_key = ttk.Entry(llm_frame, width=50, show="*")
-        self.entry_api_key.grid(row=1, column=1, pady=5, sticky="w")
-        
-        ttk.Label(llm_frame, text="模型名称:").grid(row=2, column=0, sticky="e", pady=5)
-        self.entry_model = ttk.Entry(llm_frame, width=50)
-        self.entry_model.insert(0, "gpt-3.5-turbo")
-        self.entry_model.grid(row=2, column=1, pady=5, sticky="w")
-        
-        ttk.Label(llm_frame, text="上送K线周期数 (20-80):").grid(row=3, column=0, sticky="e", pady=5)
-        self.entry_bar_count = ttk.Spinbox(llm_frame, from_=20, to=80, width=48)
-        self.entry_bar_count.insert(0, "80")
-        self.entry_bar_count.grid(row=3, column=1, pady=5, sticky="w")
-        
-        # 策略设置
-        strategy_frame = ttk.LabelFrame(tab_config, text="交易策略设定 (Strategy Prompt)", padding=(10, 10))
-        strategy_frame.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        
-        options_frame = ttk.Frame(strategy_frame)
-        options_frame.pack(fill="x", pady=5)
-        
-        self.var_indicator_enabled = tk.BooleanVar(value=True)
-        self.chk_indicator = ttk.Checkbutton(options_frame, text="附加技术指标:", variable=self.var_indicator_enabled)
-        self.chk_indicator.pack(side="left", padx=(5, 2))
-        
-        self.var_indicator_type = tk.StringVar(value="MACD")
-        self.cmb_indicator = ttk.Combobox(options_frame, textvariable=self.var_indicator_type, values=["MACD", "KDJ", "RSI", "BOLL"], width=6, state="readonly")
-        self.cmb_indicator.pack(side="left", padx=(0, 15))
-        
-        self.var_chip = tk.BooleanVar(value=True)
-        self.chk_chip = ttk.Checkbutton(options_frame, text="附加最新一期筹码分布数据", variable=self.var_chip)
-        self.chk_chip.pack(side="left", padx=15)
-
-        ttk.Label(strategy_frame, text="请在这里使用自然语言描述您希望 AI 遵守的交易策略或筛选条件。\n它将被融合进分析请求的 System 提示词中，用于指导 AI 动作。").pack(anchor="w", pady=2)
-        
-        self.text_strategy = scrolledtext.ScrolledText(strategy_frame, width=60, height=8, font=("Microsoft YaHei", 9))
-        self.text_strategy.pack(fill="both", expand=True, pady=5)
-        self.text_strategy.insert(tk.END, "请以稳健保护本金为前提。\n当前只做主升浪，遇到跌破 5 日均线请果断止损或减仓，金叉或放量突破时可适当加仓并注意仓位管理。")
-        
-        # 保存按钮
-        save_frame = ttk.Frame(tab_config)
-        save_frame.pack(fill="x", padx=10, pady=10)
-        btn_save_config = ttk.Button(save_frame, text="💾 保存所有配置", command=self.save_config_manual, style="Primary.TButton")
-        btn_save_config.pack(side="right")
-        
-    def save_config_manual(self):
-        self.save_config()
-        messagebox.showinfo("成功", "所有网络配置及交易策略已加密保存！")
-
-    def log(self, msg, tag="info"):
-        self.log_text.config(state="normal")
-        self.log_text.insert(tk.END, msg + "\n", tag)
-        self.log_text.see(tk.END)
-        self.log_text.config(state="disabled")
-        
-    def connect_to_trainer(self):
-        info_path = os.path.join(data_dir, 'ai_api_info.json')
-        if not os.path.exists(info_path):
-            self.lbl_status.config(text="状态：未找到 ai_api_info.json", foreground="red")
-            self.log(f"未找到 {info_path}，请确认主程序已开启“AI 介入”开关", "error")
-            return
-            
+    if config.get("include_chip"):
         try:
-            with open(info_path, 'r', encoding='utf-8') as f:
-                self.api_info = json.load(f)
-                
-            self.base_url = self.api_info.get('api_base_url', '')
-            trainings = self.api_info.get('active_trainings', [])
-            
-            if not self.base_url:
-                self.lbl_status.config(text="状态：JSON 文件缺少 API 地址", foreground="red")
-                return
-                
-            self.lbl_status.config(text=f"状态：已连接 ({self.base_url})", foreground="green")
-            
-            if trainings:
-                self.training_id = trainings[0]
-                self.lbl_info.config(text=f"会话绑定：[{self.training_id}]", foreground="blue")
-                self.log(f"成功连接 KLine Trainer，锁定会话：{self.training_id}", "success")
-            else:
-                self.training_id = ""
-                self.lbl_info.config(text="会话：无活跃训练", foreground="orange")
-                self.log("连接成功。请在主程序中【新建训练】后再刷新状态。", "highlight")
-                
-        except Exception as e:
-            self.lbl_status.config(text="状态：读取出现错误", foreground="red")
-            self.log(f"读取异常: {e}", "error")
+            response = requests.get(f"{base_url}/training/{training_id}/chip_distribution?bins=80", timeout=30)
+            if response.status_code == 200:
+                chips = response.json().get("data", [])
+                preview = ", ".join([f"{item['price']:.2f}:{item['volume']:.2f}" for item in chips[-20:]])
+                chip_desc = f"【当前筹码分布】价格:成交量 = {preview}\n\n"
+        except Exception:
+            pass
 
-    def toggle_auto_mode(self):
-        if not self.auto_mode:
-            if not self.base_url or not self.training_id:
-                messagebox.showwarning("警告", "尚未连接或无活跃训练会话！")
-                return
-            self.auto_mode = True
-            self.btn_auto.config(text="⏹ 停止自动托管 (Stop)", bg="#ffa39e")
-            self.log("="*40, "info")
-            self.log("开始循环全自动复盘模式...", "highlight")
-            self.start_ai_analysis()
+    context_data = []
+    for bar in recent_klines:
+        dt_str = datetime.fromtimestamp(bar["time"]).strftime("%Y-%m-%d")
+        item = {
+            "Date": dt_str,
+            "Open": round(bar["open"], 2),
+            "High": round(bar["high"], 2),
+            "Low": round(bar["low"], 2),
+            "Close": round(bar["close"], 2),
+        }
+        if bar["time"] in indicator_data:
+            item.update(indicator_data[bar["time"]])
+        context_data.append(item)
+
+    current_bar = context_data[-1]
+    stock_name = data_json.get("stock_name", "未知标的")
+    user_strategy = (config.get("strategy") or "").strip()
+
+    position_summary = account_json.get("position_summary") or {}
+    total_shares = position_summary.get("total_shares", 0)
+    available_shares = position_summary.get("available_shares", 0)
+
+    prompt = [f"你是一名 A 股交易 AI，当前复盘标的为《{stock_name}》。"]
+    if user_strategy:
+        prompt.append("【用户策略】请严格遵守以下自然语言策略：")
+        prompt.append(user_strategy)
+    prompt.append(
+        f"【账户】总资产={account_json.get('total_assets')}，可用资金={account_json.get('available_cash')}，"
+        f"总持仓={total_shares} 股，可卖={available_shares} 股。"
+    )
+    prompt.append(f"【最近{bar_count}根K线】\n{json.dumps(context_data, ensure_ascii=False, indent=2)}")
+    if chip_desc:
+        prompt.append(chip_desc)
+    prompt.append(f"【当前时间】{current_bar['Date']}，最新收盘价={current_bar['Close']}")
+    prompt.append(
+        "请只返回一个合法 JSON，不要输出 Markdown。格式为："
+        '{"action":"buy/sell/hold/next","quantity":100,"reason":"说明原因"}'
+    )
+    prompt.append("buy/sell 的 quantity 单位是股，必须是 100 的整数倍。")
+
+    return "\n\n".join(prompt), stock_name
+
+
+def perform_ai_analysis(config: dict) -> dict:
+    logs = []
+    auto_mode = bool(config.get("auto_mode", False))
+    connect_info = normalize_connect_info()
+    base_url = connect_info.get("base_url", "")
+    training_id = connect_info.get("training_id", "")
+
+    if not base_url or not training_id:
+        raise RuntimeError("未检测到有效训练会话，请先在主程序中开启训练。")
+
+    api_key = (config.get("api_key") or "").strip()
+    if not api_key:
+        raise RuntimeError("LLM API Key 不能为空。")
+
+    _append_log(logs, "正在读取训练数据与账户状态...", "info")
+    data_resp = requests.get(f"{base_url}/training/{training_id}/data", timeout=30)
+    account_resp = requests.get(f"{base_url}/training/{training_id}/account", timeout=30)
+    if data_resp.status_code != 200:
+        raise RuntimeError("训练数据读取失败。")
+    if account_resp.status_code != 200:
+        raise RuntimeError("账户数据读取失败。")
+
+    data_json = data_resp.json()
+    account_json = account_resp.json()
+    if not data_json.get("kline_data"):
+        raise RuntimeError("当前训练没有可用 K 线数据。")
+
+    prompt, stock_name = build_prompt(config, data_json, account_json)
+    _append_log(logs, f"已组装 {stock_name} 的盘面上下文，正在请求模型推理...", "highlight")
+
+    llm_url = (config.get("base_url") or "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
+    payload = {
+        "model": (config.get("model") or "gpt-4o-mini").strip(),
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a trading AI. Return only one valid JSON object with no markdown fences.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    llm_resp = requests.post(llm_url, headers=headers, json=payload, timeout=120)
+    if llm_resp.status_code != 200:
+        raise RuntimeError(f"模型请求失败: {llm_resp.status_code} {llm_resp.text}")
+
+    content = llm_resp.json()["choices"][0]["message"]["content"].strip()
+    if content.startswith("```json"):
+        content = content[7:].strip()
+    if content.startswith("```"):
+        content = content[3:].strip()
+    if content.endswith("```"):
+        content = content[:-3].strip()
+
+    try:
+        action_info = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"模型返回的不是合法 JSON: {exc}: {content}")
+
+    action = str(action_info.get("action", "next")).lower()
+    quantity = int(action_info.get("quantity", 100) or 100)
+    reason = str(action_info.get("reason", "") or "").strip()
+    _append_log(logs, f"AI 理由: {reason or '未提供'}", "ai")
+    _append_log(logs, f"AI 指令: {action.upper()} / 数量 {quantity}", "success")
+
+    result = {
+        "logs": logs,
+        "action": action,
+        "reason": reason,
+        "quantity": quantity,
+        "finished": False,
+    }
+
+    if action in {"buy", "sell"}:
+        trade_resp = requests.post(
+            f"{base_url}/training/{training_id}/trade",
+            json={"action": action, "quantity": max(1, quantity // 100)},
+            timeout=30,
+        )
+        trade_json = trade_resp.json()
+        if trade_resp.status_code == 200:
+            _append_log(logs, "委托已成交，已写入训练记录。", "success")
+            result["trade"] = trade_json.get("trade")
         else:
-            self.auto_mode = False
-            self.btn_auto.config(text="▶ 开启自动沉浸测试 (Auto Mode)", bg="#f6ffed")
-            self.log("已手动停止自动控制！", "highlight")
-            
-    def force_next_internal(self):
-        if not self.base_url or not self.training_id:
-            return False
-        try:
-            next_url = f"{self.base_url}/training/{self.training_id}/next"
-            n_resp = requests.post(next_url)
-            n_json = n_resp.json()
-            if n_resp.status_code == 200:
-                if n_json.get('finished'):
-                    self.log("🏁 训练盘面已全部走完！任务结束！", "success")
+            _append_log(logs, f"委托被拒绝: {trade_json.get('error', '未知错误')}", "error")
+
+    should_advance = action == "next" or (auto_mode and action in {"hold", "buy", "sell"})
+    if should_advance:
+        next_result = force_next_internal(base_url, training_id)
+        if next_result.get("finished"):
+            _append_log(logs, "训练已走完，自动停止。", "success")
+            result["finished"] = True
+            result["report"] = next_result.get("report")
+        else:
+            _append_log(logs, "已推进到下一根 K 线。", "info")
+
+    return result
+
+
+class AITesterWebviewApp:
+    def __init__(self):
+        self.frontend_dir = get_frontend_dir()
+        self.flask_app = Flask(__name__, static_folder=str(self.frontend_dir), static_url_path="")
+        self.port = self.find_free_port()
+        self._register_routes()
+
+    @staticmethod
+    def find_free_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return sock.getsockname()[1]
+
+    def _register_routes(self):
+        @self.flask_app.route("/")
+        def index():
+            return self.flask_app.send_static_file("index.html")
+
+        @self.flask_app.route("/api/config", methods=["GET", "POST"])
+        def config_api():
+            if request.method == "GET":
+                return jsonify(load_config())
+            payload = request.get_json() or {}
+            save_config(payload)
+            return jsonify({"success": True})
+
+        @self.flask_app.route("/api/connect", methods=["POST"])
+        def connect_api():
+            try:
+                return jsonify(normalize_connect_info())
+            except Exception as exc:
+                return jsonify({"status": "error", "message": str(exc)}), 500
+
+        @self.flask_app.route("/api/action/next", methods=["POST"])
+        def next_api():
+            payload = request.get_json() or {}
+            try:
+                result = force_next_internal(payload["base_url"], payload["training_id"])
+                return jsonify(result)
+            except Exception as exc:
+                return jsonify({"error": str(exc)}), 500
+
+        @self.flask_app.route("/api/action/analyze", methods=["POST"])
+        def analyze_api():
+            payload = request.get_json() or {}
+            try:
+                save_config(payload)
+                return jsonify(perform_ai_analysis(payload))
+            except Exception as exc:
+                return jsonify({"error": str(exc)}), 500
+
+        @self.flask_app.route("/api/health", methods=["GET"])
+        def health():
+            return jsonify({"status": "ok", "timestamp": datetime.now().isoformat()})
+
+    def start_server(self):
+        get_data_dir().mkdir(parents=True, exist_ok=True)
+        self.flask_app.run(host="127.0.0.1", port=self.port, debug=False, use_reloader=False)
+
+    def wait_until_ready(self) -> bool:
+        health_url = f"http://127.0.0.1:{self.port}/api/health"
+        for _ in range(30):
+            try:
+                response = urllib.request.urlopen(health_url, timeout=1)
+                if response.status == 200:
                     return True
-                else:
-                    self.log(f"➡️ 成功步进至下一K线", "info")
-                    return False
-            else:
-                self.log(f"❌ 步进失败：{n_json.get('error')}", "error")
-                return False
-        except Exception as e:
-            self.log(f"网络异常: {e}", "error")
-            return False
+            except (urllib.error.URLError, socket.timeout):
+                pass
+            time.sleep(0.3)
+        return False
 
-    def force_next(self):
-        if not self.base_url or not self.training_id:
-            messagebox.showwarning("提示", "未检测到有效连接。")
-            return
-        finished = self.force_next_internal()
-        if finished and self.auto_mode:
-            self.auto_mode = False
-            self.log("自动模式随之终止。", "highlight")
-            self.btn_auto.config(text="▶ 开启自动沉浸测试 (Auto Mode)", bg="#f6ffed")
+    def run(self):
+        if not self.frontend_dir.exists():
+            raise RuntimeError(f"AI tester 前端目录不存在: {self.frontend_dir}")
 
-    def start_ai_analysis(self):
-        if not self.base_url or not self.training_id:
-            messagebox.showwarning("提示", "未找到训练会话，请先检查连接。")
-            if self.auto_mode: self.toggle_auto_mode()
-            return
-            
-        api_key = self.entry_api_key.get().strip()
-        if not api_key:
-            messagebox.showwarning("提示", "LLM API Key 不能为空，请在配置页补充。")
-            if self.auto_mode: self.toggle_auto_mode()
-            return
-            
-        self.save_config()
-            
-        self.btn_analyze.config(state="disabled")
-        self.btn_next.config(state="disabled")
-        self.log("\n[" + "="*40 + "]", "info")
-        self.log("正在打包当前盘面状态与策略配置...", "info")
-        
-        threading.Thread(target=self._ai_worker, daemon=True).start()
-        
-    def _ai_worker(self):
-        try:
-            data_resp = requests.get(f"{self.base_url}/training/{self.training_id}/data")
-            acc_resp = requests.get(f"{self.base_url}/training/{self.training_id}/account")
-            
-            if data_resp.status_code != 200:
-                self._update_log("错误：数据API拉取失败", "error")
-                self.auto_mode = False
-                return
-            
-            data_json = data_resp.json()
-            acc_json = acc_resp.json()
-            kline_list = data_json.get('kline_data', [])
-            
-            if not kline_list:
-                self._update_log("错误：返回的K线盘面空白", "error")
-                self.auto_mode = False
-                return
-                
-            try:
-                bar_count = int(self.entry_bar_count.get().strip())
-                bar_count = max(20, min(80, bar_count))
-            except ValueError:
-                bar_count = 80
-                
-            recent_klines = kline_list[-bar_count:]
-            
-            # 附加 Indicator 或 筹码 等状态数据
-            indicator_data = {}
-            if self.var_indicator_enabled.get():
-                indicator_type = self.var_indicator_type.get()
-                try:
-                    ind_resp = requests.get(f"{self.base_url}/training/{self.training_id}/indicators/{indicator_type}")
-                    if ind_resp.status_code == 200:
-                        ind_list = ind_resp.json().get('data', [])
-                        # 同步提取同等数量的最后 bar_count 根记录
-                        recent_ind = ind_list[-bar_count:] if ind_list else []
-                        for m in recent_ind:
-                            vals_dict = {k: round(v, 3) for k, v in m.items() if k not in ('time', 'bar_id', 'is_preview')}
-                            indicator_data[m['time']] = vals_dict
-                except Exception as e:
-                    pass
+        server_thread = threading.Thread(target=self.start_server, daemon=True)
+        server_thread.start()
+        if not self.wait_until_ready():
+            raise RuntimeError("AI tester 本地服务启动超时。")
 
-            chip_desc = ""
-            if self.var_chip.get():
-                try:
-                    chip_resp = requests.get(f"{self.base_url}/training/{self.training_id}/chip_distribution?bins=80")
-                    if chip_resp.status_code == 200:
-                        chips = chip_resp.json().get('data', [])
-                        chip_desc = f"【当前筹码分布状态】全集筹码柱(价格:交易量): {', '.join([f'{c['price']:0.2f}:{c['volume']:0.2f}' for c in chips[-20:]])} (列出了分布图最高区域的顶端或随机截面)。\n\n"
-                except Exception as e:
-                    pass
+        icon_path = get_bundle_base() / "ai_assistant.ico"
+        window = webview.create_window(
+            title="KLine Trainer AI 策略测试器",
+            url=f"http://127.0.0.1:{self.port}/",
+            width=1380,
+            height=920,
+            text_select=True,
+        )
+        webview.start(debug=False)
 
-            context_data = []
-            for k in recent_klines:
-                import datetime
-                dtStr = datetime.datetime.fromtimestamp(k['time']).strftime('%Y-%m-%d')
-                bar_dict = {
-                    "Date": dtStr,
-                    "Open": round(k['open'], 2), "High": round(k['high'], 2), 
-                    "Low": round(k['low'], 2), "Close": round(k['close'], 2)
-                }
-                if k['time'] in indicator_data:
-                    bar_dict.update(indicator_data[k['time']])
-                context_data.append(bar_dict)                
-            current_bar = context_data[-1]
-            stock_name = data_json.get('stock_name', '未知')
-            
-            user_strategy = self.text_strategy.get("1.0", tk.END).strip()
-            
-            prompt = f"你是一台A股智能量化交易引擎。正在复盘测试标的：【{stock_name}】。\n\n"
-            
-            if user_strategy:
-                prompt += f"【重要指示：用户的交易策略设定】\n请务必严格遵守以下策略思路或者操作指令：\n\"\"\"\n{user_strategy}\n\"\"\"\n\n"
-            
-            prompt += f"【当前账户与持仓状态】\n总资产：{acc_json.get('total_assets')}元 | 剩余可用资金：{acc_json.get('available_cash')}元\n"
-            
-            pos_summary = acc_json.get('position_summary')
-            current_qty = pos_summary.get('total_shares', 0) if pos_summary else 0
-            available_qty = pos_summary.get('available_shares', 0) if pos_summary else 0
-            prompt += f"总持仓：{current_qty}股 (依据T+1规则，今日真正能够卖出的股数为：{available_qty}股)\n\n"
-            
-            prompt += f"【盘面数据】最近 {bar_count} 根日K线：\n{json.dumps(context_data, ensure_ascii=False, indent=2)}\n\n"
-            if chip_desc:
-                prompt += chip_desc
-            prompt += f"【提示视窗】今日为 {current_bar['Date']}，当天最终收盘价：{current_bar['Close']}。\n\n"
-            
-            prompt += "【决策输出要求】务必结合策略、持仓与趋势情况进行评判，纯JSON回复格式如下：\n"
-            prompt += '{"action": "sell/buy/next", "quantity": 100, "reason": "你的思考与抉择流"}\n\n'
-            prompt += "- buy=买入开仓, quantity向下取整为100的整数倍, 单位（股）；\n"
-            prompt += "- sell=卖出平仓, 单位（股）, 数量不得超过上述的【可卖出股数】；\n"
-            prompt += "- hold=保持观望 / next=空仓无聊直接推翻至下一天。 (二者均使quantity失效)。\n"
-            
-            self._update_log("🚀 数据及用户策略参数已注入，向大模型中心传输推理请求...", "highlight")
-            
-            llm_url = self.entry_base_url.get().strip() + "/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {self.entry_api_key.get().strip()}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": self.entry_model.get().strip(),
-                "messages": [
-                    {"role": "system", "content": "You are a specialized mathematical trading AI returning ONLY an unformatted valid JSON payload."},
-                    {"role": "user", "content": prompt}
-                ],
-                "stream": False
-            }
-            
-            resp = requests.post(llm_url, headers=headers, json=payload, timeout=10000)
-            if resp.status_code != 200:
-                self._update_log(f"网络阻断 (Status: {resp.status_code}) - {resp.text}", "error")
-                self.auto_mode = False
-                return
-                
-            resp_body = resp.json()
-            content = resp_body['choices'][0]['message']['content'].strip()
-            
-            if content.startswith("```json"): content = content[7:-3].strip()
-            elif content.startswith("```"): content = content[3:-3].strip()
-                
-            try:
-                action_info = json.loads(content)
-            except json.JSONDecodeError:
-                self._update_log("解析异常：大模型返回了不合规的 JSON 框架。", "error")
-                self._update_log(content, "info")
-                self.auto_mode = False
-                return
-                
-            action = action_info.get("action", "next").lower()
-            qty = action_info.get("quantity", 100)
-            reason = action_info.get("reason", "")
-            
-            self._update_log(f"💡 [AI 分析思路]：{reason}", "ai")
-            self._update_log(f"🎯 [AI 推理打单指令]：{action.upper()} (股票数量额: {qty})", "success")
-            
-            if action in ['buy', 'sell']:
-                qty_in_lots = max(1, int(qty) // 100)
-                trade_url = f"{self.base_url}/training/{self.training_id}/trade"
-                t_resp = requests.post(trade_url, json={"action": action, "quantity": qty_in_lots})
-                t_json = t_resp.json()
-                if t_resp.status_code == 200:
-                    self._update_log("✅ 该委托单已被行情撮合接受并且成交记录在册。", "success")
-                    if self.auto_mode:
-                        finished = self.force_next_internal()
-                        if finished: self.auto_mode = False
-                else:
-                    self._update_log(f"❌ 挂单遭拒收：{t_json.get('error')}", "error")
-                    if self.auto_mode:
-                        self._update_log("⚠️ 自动跳过无效订单并推进时间轴至未免卡死...", "error")
-                        finished = self.force_next_internal()
-                        if finished: self.auto_mode = False
-                    
-            elif action == 'hold':
-                self._update_log("收到 Hold 观望信号，当日不做多空交易。", "info")
-                if self.auto_mode:
-                    finished = self.force_next_internal()
-                    if finished: self.auto_mode = False
-                
-            elif action == 'next':
-                finished = self.force_next_internal()
-                if finished and self.auto_mode: self.auto_mode = False
-                
-            else:
-                self._update_log(f"无法识别的自创指令: {action}", "error")
-                if self.auto_mode:
-                    finished = self.force_next_internal()
-                    if finished: self.auto_mode = False
-                
-        except Exception as e:
-            self._update_log(f"发生崩溃性错误或超时断连: {e}", "error")
-            self.auto_mode = False
-        finally:
-            self.root.after(0, self._worker_completed)
-            
-    def _worker_completed(self):
-        self.btn_analyze.config(state="normal")
-        self.btn_next.config(state="normal")
-        if self.auto_mode:
-            self.btn_auto.config(text="⏹ 停止自动托管 (Stop)", bg="#ffa39e")
-            self.log("-"*40, "info")
-            self.root.after(2000, self.start_ai_analysis)
-        else:
-            self.btn_auto.config(text="▶ 开启自动沉浸测试 (Auto Mode)", bg="#f6ffed")
 
-    def _update_log(self, msg, tag="info"):
-        self.root.after(0, lambda: self.log(msg, tag))
+def main():
+    app = AITesterWebviewApp()
+    app.run()
+
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app_tester = AIInterventionTesterApp(root)
-    root.mainloop()
+    main()

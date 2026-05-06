@@ -1,4 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+
+# Dynamically find akshare path
+try:
+    import akshare
+    akshare_path = os.path.dirname(akshare.__file__)
+except ImportError:
+    # Fallback if strictly running without akshare installed in sys.path
+    akshare_path = os.path.join('.venv', 'Lib', 'site-packages', 'akshare')
 
 block_cipher = None
 
@@ -8,7 +17,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('frontend', 'frontend'),
-        ('.venv\\Lib\\site-packages\\akshare', 'akshare'),
+        (akshare_path, 'akshare'),
     ],
     hiddenimports=[],
     hookspath=[],

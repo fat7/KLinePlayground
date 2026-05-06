@@ -18,26 +18,297 @@ let autoSyncInterval = null;
 let lastKnownBarId = null;
 let lastKnownTradeCount = null;
 let maPeriods = [5, 10, 20]; // 默认MA周期
+let isShiftClicked = false;
+let isShiftKeyPressed = false;
+let currentTheme = localStorage.getItem('uiTheme') || 'light';
+let currentPeriod = 'daily';
+let availableDataSources = [];
+let latestRenderedKlineData = [];
+let trainingSetupReturnScreen = 'main';
+let currentReportData = null;
+let isViewOnlyMode = false;
+
+const THEME_PALETTES = {
+    light: {
+        chartBg: '#fdfefe',
+        text: '#172033',
+        grid: 'rgba(23, 32, 51, 0.08)',
+        border: 'rgba(23, 32, 51, 0.12)',
+        overlay: 'rgba(255, 255, 255, 0.84)',
+        positive: '#e25555',
+        negative: '#0f8a52',
+        neutral: '#5d6b82',
+        chip: 'linear-gradient(90deg, transparent, rgba(15, 111, 255, 0.28))',
+    },
+    dark: {
+        chartBg: '#121d31',
+        text: '#ecf2ff',
+        grid: 'rgba(255, 255, 255, 0.08)',
+        border: 'rgba(255, 255, 255, 0.12)',
+        overlay: 'rgba(9, 17, 31, 0.84)',
+        positive: '#ff7a74',
+        negative: '#4fd096',
+        neutral: '#9daccc',
+        chip: 'linear-gradient(90deg, transparent, rgba(103, 165, 255, 0.28))',
+    }
+};
+
+function getThemePalette() {
+    return THEME_PALETTES[currentTheme] || THEME_PALETTES.light;
+}
+
+function updateThemeButton() {
+    const themeBtn = document.getElementById('theme-toggle-btn');
+    if (themeBtn) {
+        themeBtn.textContent = currentTheme === 'dark' ? '浅色主题' : '深色主题';
+    }
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect) {
+        themeSelect.value = currentTheme;
+    }
+}
+
+function updatePeriodBadge(period) {
+    currentPeriod = period || 'daily';
+    const badge = document.getElementById('current-period');
+    if (badge) {
+        badge.textContent = currentPeriod === 'weekly' ? '周K' : '日K';
+    }
+    document.querySelectorAll('.view-period-btn').forEach((button) => {
+        button.classList.toggle('active', button.dataset.period === currentPeriod);
+    });
+}
+
+async function persistUserSettings(partialSettings) {
+    if (!currentUser) return;
+    try {
+        await fetch(`${API_BASE}/users/${currentUser}/settings`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(partialSettings)
+        });
+    } catch (error) {
+        console.error('保存用户设置失败:', error);
+    }
+}
+
+function applyTheme(theme, persist = true, syncUser = false) {
+    currentTheme = theme === 'dark' ? 'dark' : 'light';
+    document.body.dataset.theme = currentTheme;
+    if (persist) {
+        localStorage.setItem('uiTheme', currentTheme);
+    }
+    if (syncUser) {
+        persistUserSettings({ theme: currentTheme });
+    }
+    updateThemeButton();
+    updatePriceMode();
+    applyChartTheme();
+}
+
+function getViewPeriodQuery() {
+    return `view_period=${currentPeriod}`;
+}
+
+function showLoading(title = '正在加载', detail = '') {
+    const overlay = document.getElementById('loading-overlay');
+    if (!overlay) return;
+    const titleEl = document.getElementById('loading-title');
+    const detailEl = document.getElementById('loading-detail');
+    if (titleEl) titleEl.textContent = title;
+    if (detailEl) detailEl.textContent = detail || '请稍候...';
+    overlay.classList.remove('hidden');
+}
+
+function hideLoading() {
+    document.getElementById('loading-overlay')?.classList.add('hidden');
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function applyChartTheme() {
+    const palette = getThemePalette();
+    const infoDisplay = document.getElementById('chart-info-display');
+    if (infoDisplay) {
+        infoDisplay.style.background = palette.overlay;
+        infoDisplay.style.color = palette.text;
+        infoDisplay.style.borderColor = palette.border;
+    }
+    const indicatorInfoDisplay = document.getElementById('indicator-info-display');
+    if (indicatorInfoDisplay) {
+        indicatorInfoDisplay.style.background = palette.overlay;
+        indicatorInfoDisplay.style.color = palette.text;
+        indicatorInfoDisplay.style.borderColor = palette.border;
+    }
+
+    document.querySelectorAll('.chip-bar').forEach((bar) => {
+        bar.style.background = palette.chip;
+    });
+
+    if (!chart) return;
+
+    chart.applyOptions({
+        layout: {
+            background: { type: 'solid', color: palette.chartBg },
+            textColor: palette.text,
+        },
+        grid: {
+            vertLines: { color: palette.grid },
+            horzLines: { color: palette.grid },
+        },
+        rightPriceScale: { borderColor: palette.border },
+        timeScale: { borderColor: palette.border },
+    });
+
+    if (volumeChart) {
+        volumeChart.applyOptions({
+            layout: {
+                background: { type: 'solid', color: palette.chartBg },
+                textColor: palette.text,
+            },
+            grid: {
+                vertLines: { color: palette.grid },
+                horzLines: { color: palette.grid },
+            },
+            rightPriceScale: { borderColor: palette.border },
+            timeScale: { borderColor: palette.border },
+        });
+    }
+
+    if (indicatorChart) {
+        indicatorChart.applyOptions({
+            layout: {
+                background: { type: 'solid', color: palette.chartBg },
+                textColor: palette.text,
+            },
+            grid: {
+                vertLines: { color: palette.grid },
+                horzLines: { color: palette.grid },
+            },
+            rightPriceScale: { borderColor: palette.border },
+            timeScale: { borderColor: palette.border },
+        });
+    }
+
+    if (candlestickSeries) {
+        candlestickSeries.applyOptions({
+            downColor: palette.negative,
+            borderUpColor: palette.positive,
+            borderDownColor: palette.negative,
+            wickUpColor: palette.positive,
+            wickDownColor: palette.negative,
+        });
+    }
+}
+
+function updatePriceMode() {
+    const isModeOpen = isShiftClicked || isShiftKeyPressed;
+    const shiftBtn = document.getElementById('shift-toggle-btn');
+    const buyBtn = document.getElementById('buy-btn');
+    const sellBtn = document.getElementById('sell-btn');
+    const palette = getThemePalette();
+    
+    if (!shiftBtn || !buyBtn || !sellBtn) return;
+    
+    if (isModeOpen) {
+        shiftBtn.style.backgroundColor = palette.positive;
+        shiftBtn.style.color = 'white';
+        shiftBtn.style.borderColor = 'transparent';
+        buyBtn.textContent = '买(开盘)';
+        sellBtn.textContent = '卖(开盘)';
+    } else {
+        shiftBtn.style.backgroundColor = '';
+        shiftBtn.style.color = '';
+        shiftBtn.style.borderColor = '';
+        buyBtn.textContent = '买(收盘)';
+        sellBtn.textContent = '卖(收盘)';
+    }
+}
 const maColors = ['#1d2140', '#2816cf', '#ff8103', '#e02424', '#8b5cf6', '#059669']; // 6个预设颜色
 
 // --- 筹码分布开始 ---
 let chipDistributionData = null;
 
+function scheduleChipDistributionRender() {
+    if (typeof window === 'undefined') {
+        renderChipDistribution();
+        return;
+    }
+
+    window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+            renderChipDistribution();
+        });
+    });
+}
+
+function getChipPriceCoordinate(price, containerHeight) {
+    if (!Number.isFinite(price) || !containerHeight) {
+        return null;
+    }
+
+    const directCoordinate = candlestickSeries?.priceToCoordinate?.(price);
+    if (Number.isFinite(directCoordinate)) {
+        return directCoordinate;
+    }
+
+    if (!Array.isArray(latestRenderedKlineData) || latestRenderedKlineData.length === 0) {
+        return null;
+    }
+
+    let minPrice = Number.POSITIVE_INFINITY;
+    let maxPrice = Number.NEGATIVE_INFINITY;
+    latestRenderedKlineData.forEach((bar) => {
+        if (Number.isFinite(bar?.low)) minPrice = Math.min(minPrice, bar.low);
+        if (Number.isFinite(bar?.high)) maxPrice = Math.max(maxPrice, bar.high);
+    });
+
+    if (!Number.isFinite(minPrice) || !Number.isFinite(maxPrice)) {
+        return null;
+    }
+
+    if (maxPrice === minPrice) {
+        return containerHeight / 2;
+    }
+
+    const clampedPrice = Math.min(maxPrice, Math.max(minPrice, price));
+    return ((maxPrice - clampedPrice) / (maxPrice - minPrice)) * containerHeight;
+}
+
 async function updateChipDistribution() {
     const toggleCb = document.getElementById('toggle-chip-distribution');
+    const profitRatioContainer = document.getElementById('profit-ratio-container');
+    
     if (!toggleCb || !toggleCb.checked) {
         const container = getOrCreateVolumeProfileContainer();
         if (container) container.style.display = 'none';
+        if (profitRatioContainer) {
+            profitRatioContainer.classList.add('hidden');
+            profitRatioContainer.style.display = 'none';
+        }
         return;
+    }
+
+    if (profitRatioContainer) {
+        profitRatioContainer.classList.remove('hidden');
+        profitRatioContainer.style.display = 'flex';
     }
 
     if (!currentTraining || !currentTraining.id) return;
 
     try {
-        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/chip_distribution?bins=80`);
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/chip_distribution?bins=80&${getViewPeriodQuery()}`);
         if (response.ok) {
             chipDistributionData = await response.json();
-            renderChipDistribution();
+            scheduleChipDistributionRender();
+        } else {
+            chipDistributionData = null;
+            const container = getOrCreateVolumeProfileContainer();
+            if (container) container.innerHTML = '';
         }
     } catch (e) {
         console.error("Failed to load chip distribution", e);
@@ -45,80 +316,105 @@ async function updateChipDistribution() {
 }
 
 function renderChipDistribution() {
-    const toggleCb = document.getElementById('toggle-chip-distribution');
-    if (!toggleCb || !toggleCb.checked) {
-        return;
-    }
-    const container = getOrCreateVolumeProfileContainer();
-    container.style.display = 'block';
-    
-    if (!chipDistributionData || !chipDistributionData.data || !candlestickSeries || !chart) {
-        container.innerHTML = '';
-        return;
-    }
-
-    const data = chipDistributionData.data;
-    if (data.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
-
-    // 计算获利盘比例
-    const currentData = candlestickSeries.data();
-    if (currentData.length > 0) {
-        const currentPrice = currentData[currentData.length - 1].close;
-        let profitVolume = 0;
-        let totalVolume = 0;
-        data.forEach(bin => {
-            totalVolume += bin.volume;
-            if (bin.price < currentPrice) profitVolume += bin.volume;
-        });
-        const profitRatioEl = document.getElementById('profit-ratio');
-        if (profitRatioEl) {
-            const profitRatio = totalVolume > 0 ? ((profitVolume / totalVolume) * 100).toFixed(2) : 0;
-            profitRatioEl.textContent = `${profitRatio}%`;
-            profitRatioEl.style.color = profitRatio > 50 ? '#ff4d4f' : '#008000';
+    try {
+        const toggleCb = document.getElementById('toggle-chip-distribution');
+        if (!toggleCb || !toggleCb.checked) {
+            return;
         }
-    }
-
-    const maxVolume = Math.max(...data.map(d => d.volume));
-    const fragment = document.createDocumentFragment();
-    
-    data.forEach((bin, i) => {
-        const y = candlestickSeries.priceToCoordinate(bin.price);
-        if (y === null || y < -50 || y > container.clientHeight + 50) {
-            return; 
-        }
+        const container = getOrCreateVolumeProfileContainer();
+        container.style.display = 'block';
         
-        let nextY = null;
-        if (i < data.length - 1) {
-            nextY = candlestickSeries.priceToCoordinate(data[i+1].price);
-        } else if (i > 0) {
-            const prevY = candlestickSeries.priceToCoordinate(data[i-1].price);
-            if (y !== null && prevY !== null) {
-                nextY = y - (prevY - y);
+        if (!chipDistributionData || !chipDistributionData.data || !candlestickSeries || !chart) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const data = chipDistributionData.data;
+        if (data.length === 0) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const currentData = latestRenderedKlineData;
+        let currentPrice = null;
+        if (currentData.length > 0) {
+            currentPrice = currentData[currentData.length - 1].close;
+            let profitVolume = 0;
+            let totalVolume = 0;
+            data.forEach(bin => {
+                totalVolume += bin.volume;
+                if (bin.price <= currentPrice) profitVolume += bin.volume;
+            });
+            const profitRatioEl = document.getElementById('profit-ratio');
+            if (profitRatioEl) {
+                const palette = getThemePalette();
+                const profitRatio = totalVolume > 0 ? ((profitVolume / totalVolume) * 100).toFixed(2) : 0;
+                profitRatioEl.textContent = `${profitRatio}%`;
+                profitRatioEl.style.color = profitRatio > 50 ? palette.positive : palette.negative;
+            }
+        }
+
+        const maxVolume = Math.max(...data.map(d => d.volume), 0);
+        if (!maxVolume) {
+            container.innerHTML = '';
+            return;
+        }
+
+        const containerHeight = container.clientHeight || document.getElementById('chart')?.clientHeight || 0;
+        const fragment = document.createDocumentFragment();
+        let renderedCount = 0;
+
+        if (Number.isFinite(currentPrice)) {
+            const currentLineY = getChipPriceCoordinate(currentPrice, containerHeight);
+            if (currentLineY !== null) {
+                const currentLine = document.createElement('div');
+                currentLine.className = 'chip-current-line';
+                currentLine.style.top = `${currentLineY}px`;
+                fragment.appendChild(currentLine);
             }
         }
         
-        let barHeight = 2;
-        if (y !== null && nextY !== null) {
-            barHeight = Math.abs(y - nextY);
-        }
-        if (barHeight < 1) barHeight = 1;
+        data.forEach((bin, i) => {
+            const y = getChipPriceCoordinate(bin.price, containerHeight);
+            if (y === null || y < -50 || y > containerHeight + 50) {
+                return; 
+            }
+            
+            let nextY = null;
+            if (i < data.length - 1) {
+                nextY = getChipPriceCoordinate(data[i + 1].price, containerHeight);
+            } else if (i > 0) {
+                const prevY = getChipPriceCoordinate(data[i - 1].price, containerHeight);
+                if (y !== null && prevY !== null) {
+                    nextY = y - (prevY - y);
+                }
+            }
+            
+            let barHeight = 2;
+            if (y !== null && nextY !== null) {
+                barHeight = Math.abs(y - nextY);
+            }
+            if (barHeight < 1) barHeight = 1;
+            
+            const widthPercent = (bin.volume / maxVolume) * 100;
+            
+            const barDiv = document.createElement('div');
+            const isProfitChip = Number.isFinite(currentPrice) ? bin.price <= currentPrice : true;
+            barDiv.className = `chip-bar ${isProfitChip ? 'chip-profit' : 'chip-loss'}`;
+            barDiv.style.top = `${y - barHeight/2}px`;
+            barDiv.style.width = `${Math.max(widthPercent, 2)}%`;
+            barDiv.style.height = `${barHeight * 0.9}px`;
+            
+            fragment.appendChild(barDiv);
+            renderedCount += 1;
+        });
         
-        const widthPercent = (bin.volume / maxVolume) * 100;
-        
-        const barDiv = document.createElement('div');
-        barDiv.className = 'chip-bar';
-        barDiv.style.top = `${y - barHeight/2}px`;
-        barDiv.style.width = `${widthPercent}%`;
-        barDiv.style.height = `${barHeight * 0.9}px`;
-        
-        fragment.appendChild(barDiv);
-    });
-    
-    container.innerHTML = '';
-    container.appendChild(fragment);
+        container.innerHTML = '';
+        container.appendChild(fragment);
+        container.dataset.renderedCount = String(renderedCount);
+    } catch (error) {
+        console.error('渲染筹码分布失败:', error);
+    }
 }
 
 function getOrCreateVolumeProfileContainer() {
@@ -136,6 +432,72 @@ function getOrCreateVolumeProfileContainer() {
     }
     return container;
 }
+
+function ensureBackToReportButton() {
+    let backBtn = document.getElementById('back-to-report-btn');
+    if (backBtn) {
+        return backBtn;
+    }
+
+    const controlsSection = document.querySelector('.training-controls');
+    if (!controlsSection) {
+        return null;
+    }
+
+    backBtn = document.createElement('button');
+    backBtn.id = 'back-to-report-btn';
+    backBtn.className = 'btn btn-primary hidden';
+    backBtn.style.width = '100%';
+    backBtn.style.marginTop = '10px';
+    backBtn.textContent = '返回复盘报告';
+    backBtn.onclick = () => {
+        setTrainingViewOnlyMode(false, { showBackToReport: false });
+        document.getElementById('training-interface').classList.add('hidden');
+        document.getElementById('report-interface').classList.remove('hidden');
+        toggleToolbarForTraining(false);
+    };
+    controlsSection.appendChild(backBtn);
+    return backBtn;
+}
+
+function setTrainingViewOnlyMode(viewOnly, options = {}) {
+    const { showBackToReport = false } = options;
+    const disabled = !!viewOnly;
+    const opacity = disabled ? '0.5' : '1';
+    const cursor = disabled ? 'not-allowed' : 'pointer';
+
+    document.querySelectorAll('.trade-controls button').forEach((btn) => {
+        btn.disabled = disabled;
+        btn.style.opacity = opacity;
+        btn.style.cursor = cursor;
+    });
+
+    const tradeQuantityInput = document.getElementById('trade-quantity');
+    if (tradeQuantityInput) {
+        tradeQuantityInput.disabled = disabled;
+    }
+
+    const playbackSpeedSelect = document.getElementById('playback-speed');
+    if (playbackSpeedSelect) {
+        playbackSpeedSelect.disabled = disabled;
+        playbackSpeedSelect.style.opacity = opacity;
+    }
+
+    ['end-training-btn', 'reset-training-btn', 'next-bar-btn', 'play-pause-btn'].forEach((id) => {
+        const element = document.getElementById(id);
+        if (!element) return;
+        element.disabled = disabled;
+        element.style.opacity = opacity;
+        element.style.cursor = cursor;
+    });
+
+    const backBtn = ensureBackToReportButton();
+    if (backBtn) {
+        backBtn.classList.toggle('hidden', !showBackToReport);
+    }
+
+    isViewOnlyMode = disabled;
+}
 // --- 筹码分布结束 ---
 
 // API 基础URL - 改为相对路径适配动态端口
@@ -151,6 +513,9 @@ document.addEventListener('DOMContentLoaded', function () {
 // 初始化应用
 async function initializeApp() {
     try {
+        applyTheme(currentTheme, false, false);
+        updatePeriodBadge('daily');
+        await loadDataSources();
         // 检查是否有保存的用户
         const savedUser = localStorage.getItem('currentUser');
         if (savedUser) {
@@ -170,6 +535,9 @@ async function initializeApp() {
                 .then(res => res.json())
                 .then(settings => {
                     updateAIApiStatus(!!settings.enable_ai_api, currentUser);
+                    if (settings.theme) {
+                        applyTheme(settings.theme, true, false);
+                    }
                 }).catch(e => console.error(e));
         }
     } catch (error) {
@@ -188,6 +556,41 @@ async function updateAIApiStatus(enabled, username) {
     } catch (e) {
         console.error('Failed to update AI API status:', e);
     }
+}
+
+async function loadDataSources() {
+    try {
+        const response = await fetch(`${API_BASE}/data/sources`);
+        if (!response.ok) return;
+        const payload = await response.json();
+        availableDataSources = payload.sources || [];
+        hydrateDataSourceSelect('data-source', true);
+        hydrateDataSourceSelect('sync-source', false);
+    } catch (error) {
+        console.error('加载数据源列表失败:', error);
+    }
+}
+
+function hydrateDataSourceSelect(selectId, includeOffline = false) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const currentValue = select.value;
+    const options = availableDataSources.filter((item) => includeOffline || item.value !== 'offline');
+    if (options.length === 0) return;
+
+    select.innerHTML = '';
+    options.forEach((item) => {
+        const option = document.createElement('option');
+        option.value = item.value;
+        const disabledText = item.available ? '' : '（未安装）';
+        option.textContent = `${item.label}${disabledText}`;
+        option.disabled = !item.available;
+        select.appendChild(option);
+    });
+
+    const hasCurrent = options.some((item) => item.value === currentValue && item.available);
+    select.value = hasCurrent ? currentValue : options.find((item) => item.available)?.value || options[0].value;
 }
 
 function renderChartLegend() {
@@ -264,6 +667,18 @@ function setupEventListeners() {
     document.getElementById('settings-btn')?.addEventListener('click', showSettings);
     document.getElementById('save-settings-btn')?.addEventListener('click', saveSettings);
     document.getElementById('cancel-settings-btn')?.addEventListener('click', hideSettings);
+    document.getElementById('theme-toggle-btn')?.addEventListener('click', () => {
+        applyTheme(currentTheme === 'dark' ? 'light' : 'dark', true, true);
+    });
+    document.getElementById('data-sync-btn')?.addEventListener('click', showDataSyncModal);
+    document.getElementById('confirm-sync-btn')?.addEventListener('click', syncOfflineData);
+    document.getElementById('cancel-sync-btn')?.addEventListener('click', hideDataSyncModal);
+    document.getElementById('sync-scope')?.addEventListener('change', updateSyncScopeUI);
+    document.querySelectorAll('.view-period-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+            switchViewPeriod(button.dataset.period || 'daily');
+        });
+    });
 
     // 标签页切换
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -283,8 +698,18 @@ function setupEventListeners() {
     });
 
     // 交易操作
-    document.getElementById('buy-btn').addEventListener('click', executeBuy);
-    document.getElementById('sell-btn').addEventListener('click', executeSell);
+    document.getElementById('shift-toggle-btn')?.addEventListener('click', () => {
+        isShiftClicked = !isShiftClicked;
+        updatePriceMode();
+    });
+
+    document.getElementById('buy-btn')?.addEventListener('click', () => {
+        executeBuy((isShiftClicked || isShiftKeyPressed) ? 'open' : 'close');
+    });
+
+    document.getElementById('sell-btn')?.addEventListener('click', () => {
+        executeSell((isShiftClicked || isShiftKeyPressed) ? 'open' : 'close');
+    });
 
     // 交易数量输入限制
     document.getElementById('trade-quantity').addEventListener('input', limitTradeQuantity);
@@ -304,12 +729,9 @@ function setupEventListeners() {
     document.getElementById('ai-analyze-btn').addEventListener('click', requestAIAnalysis);
     // document.getElementById('new-training-from-report-btn').addEventListener('click', showTrainingSetup);
     document.getElementById('new-training-from-report-btn').addEventListener('click', () => {
-        // 1. 调用全局重置函数，清理一切旧状态
-        resetToMainAppState();
-
-        // 2. 紧接着，显示新的训练设置界面
-        showTrainingSetup();
+        showTrainingSetup('report');
     });
+    document.getElementById('return-main-menu-btn')?.addEventListener('click', resetToMainAppState);
 
 
     // 监听窗口大小变化
@@ -319,6 +741,10 @@ function setupEventListeners() {
 // 设置键盘快捷键
 function setupKeyboardShortcuts() {
     document.addEventListener('keydown', function (event) {
+        if (event.key === 'Shift') {
+            isShiftKeyPressed = true;
+            updatePriceMode();
+        }
         // 只在训练界面激活快捷键
         if (document.getElementById('training-interface').classList.contains('hidden') || isViewOnlyMode) {
             return;
@@ -347,13 +773,14 @@ function setupKeyboardShortcuts() {
             case '+':
             case '=':
                 event.preventDefault(); // 阻止默认行为（如输入'b'或'+'）
-                executeBuy();
+                executeBuy((isShiftClicked || isShiftKeyPressed || event.shiftKey) ? 'open' : 'close');
                 break;
 
             case 's':
             case '-':
+            case '_':
                 event.preventDefault(); // 阻止默认行为
-                executeSell();
+                executeSell((isShiftClicked || isShiftKeyPressed || event.shiftKey) ? 'open' : 'close');
                 break;
 
             case ' ':
@@ -375,6 +802,13 @@ function setupKeyboardShortcuts() {
         }
 
     });
+    
+    document.addEventListener('keyup', function (event) {
+        if (event.key === 'Shift') {
+            isShiftKeyPressed = false;
+            updatePriceMode();
+        }
+    });
 }
 
 // 处理窗口大小变化
@@ -382,13 +816,13 @@ function resizeCharts() {
     if (chart && !document.getElementById('training-interface').classList.contains('hidden')) {
         const chartContainer = document.getElementById('chart');
         const volumeContainer = document.getElementById('volume-chart');
-        const indicatorContainer = document.getElementById('indicator-chart');
+        const indicatorContainer = document.getElementById('indicator-canvas');
 
         chart.resize(chartContainer.clientWidth, chartContainer.clientHeight);
         volumeChart.resize(volumeContainer.clientWidth, volumeContainer.clientHeight);
         indicatorChart.resize(indicatorContainer.clientWidth, indicatorContainer.clientHeight);
         
-        renderChipDistribution();
+        scheduleChipDistributionRender();
     }
 }
 
@@ -519,6 +953,9 @@ function selectUser(username) {
         .then(res => res.json())
         .then(settings => {
             updateAIApiStatus(!!settings.enable_ai_api, username);
+            if (settings.theme) {
+                applyTheme(settings.theme, true, false);
+            }
         }).catch(e => console.error(e));
 }
 
@@ -559,6 +996,8 @@ async function loadUserStatistics() {
 function toggleToolbarForTraining(isTraining) {
     const elementsToToggle = [
         document.getElementById('switch-user-btn'),
+        document.getElementById('theme-toggle-btn'),
+        document.getElementById('data-sync-btn'),
         document.getElementById('settings-btn'),
         document.getElementById('new-training-btn'),
         document.getElementById('main-title') // 新增的标题元素
@@ -576,6 +1015,7 @@ function toggleToolbarForTraining(isTraining) {
  * 用于从复盘报告或训练界面返回时，清理所有状态
  */
 function resetToMainAppState() {
+    const cleanupTrainingId = currentTraining?.id;
     // 1. 暂停任何正在进行的回放
     if (isPlaying) {
         pausePlayback();
@@ -598,7 +1038,10 @@ function resetToMainAppState() {
     // 清空图表容器，确保 Lightweight Charts 的 DOM 被彻底移除
     document.getElementById('chart').innerHTML = '';
     document.getElementById('volume-chart').innerHTML = '';
-    document.getElementById('indicator-chart').innerHTML = '';
+    const indicatorCanvas = document.getElementById('indicator-canvas');
+    if (indicatorCanvas) {
+        indicatorCanvas.innerHTML = '';
+    }
 
     // 3. 重置所有图表系列变量
     candlestickSeries = null;
@@ -608,6 +1051,7 @@ function resetToMainAppState() {
     tradeMarkerSeries = null;
     currentIndicatorSeries = [];
     bollSeries = {};
+    latestRenderedKlineData = [];
 
     // 4. 清理界面上的动态数据
     // 清理交易记录
@@ -620,6 +1064,11 @@ function resetToMainAppState() {
     document.getElementById('position-value').textContent = '¥-';
     document.getElementById('floating-pnl').textContent = '¥-';
     document.getElementById('floating-pnl').style.color = '#000000';
+    
+    // reset shift toggle
+    isShiftClicked = false;
+    isShiftKeyPressed = false;
+    if(typeof updatePriceMode === 'function') updatePriceMode();
     document.getElementById('max-buy-quantity').textContent = '0';
     document.getElementById('max-sell-quantity').textContent = '0';
     document.getElementById('trade-quantity').value = '1'; // 重置交易数量
@@ -633,7 +1082,9 @@ function resetToMainAppState() {
 
     // 5. 重置全局状态变量
     currentTraining = null;
+    updatePeriodBadge('daily');
     isPlaying = false;
+    trainingSetupReturnScreen = 'main';
 
     // 6. 隐藏所有主要界面，然后显示主应用界面
     document.getElementById('training-interface').classList.add('hidden');
@@ -641,41 +1092,11 @@ function resetToMainAppState() {
     document.getElementById('user-selection').classList.add('hidden');
     document.getElementById('main-app').classList.remove('hidden');
 
-    // Reset view-only mode visually
-    document.querySelectorAll('.trade-controls button').forEach(btn => {
-        btn.disabled = false;
-        btn.style.opacity = '1';
-        btn.style.cursor = 'pointer';
-    });
-    
-    const endBtn = document.getElementById('end-training-btn');
-    if (endBtn) {
-        endBtn.disabled = false;
-        endBtn.style.opacity = '1';
-    }
-
-    const nextBarBtn = document.getElementById('next-bar-btn');
-    if (nextBarBtn) {
-        nextBarBtn.disabled = false;
-        nextBarBtn.style.opacity = '1';
-    }
-    
-    const playPauseBtn = document.getElementById('play-pause-btn');
-    if (playPauseBtn) {
-        playPauseBtn.disabled = false;
-        playPauseBtn.style.opacity = '1';
-    }
-    
-    isViewOnlyMode = false;
-    
-    const backBtn = document.getElementById('back-to-report-btn');
-    if (backBtn) {
-        backBtn.classList.add('hidden');
-    }
+    setTrainingViewOnlyMode(false, { showBackToReport: false });
 
     // 清理后端的训练会话
-    if (currentTraining && currentTraining.id) {
-        fetch(`${API_BASE}/training/${currentTraining.id}/cleanup`, { method: 'POST' })
+    if (cleanupTrainingId) {
+        fetch(`${API_BASE}/training/${cleanupTrainingId}/cleanup`, { method: 'POST' })
             .catch(e => console.error('Cleanup failed:', e));
     }
     
@@ -702,12 +1123,15 @@ function showMainApp() {
     document.getElementById('main-app').classList.remove('hidden');
     document.getElementById('training-interface').classList.add('hidden');
     document.getElementById('report-interface').classList.add('hidden');
+    updatePeriodBadge('daily');
+    setTrainingViewOnlyMode(false, { showBackToReport: false });
 
     // 确保按钮和标题是可见的
     toggleToolbarForTraining(false);
 }
 
-async function showTrainingSetup() {
+async function showTrainingSetup(returnScreen = null) {
+    trainingSetupReturnScreen = returnScreen || (document.getElementById('report-interface').classList.contains('hidden') ? 'main' : 'report');
     if (currentUser) {
         try {
             const response = await fetch(`${API_BASE}/users/${currentUser}/settings`);
@@ -729,6 +1153,228 @@ async function showTrainingSetup() {
 
 function hideTrainingSetup() {
     document.getElementById('training-setup').classList.add('hidden');
+    trainingSetupReturnScreen = 'main';
+}
+
+function showDataSyncModal() {
+    const modal = document.getElementById('data-sync-modal');
+    if (!modal) return;
+
+    const currentStock = currentTraining?.stock_code || document.getElementById('stock-code')?.value || '';
+    const stockInput = document.getElementById('sync-stock-code');
+    const startInput = document.getElementById('sync-start-date');
+    const endInput = document.getElementById('sync-end-date');
+    const sourceSelect = document.getElementById('sync-source');
+    const scopeSelect = document.getElementById('sync-scope');
+    const forceFull = document.getElementById('sync-force-full');
+    const resultBox = document.getElementById('sync-result');
+    const progressWrap = document.getElementById('sync-progress-wrap');
+    const progressFill = document.getElementById('sync-progress-fill');
+    const progressText = document.getElementById('sync-progress-text');
+
+    if (stockInput && currentStock) stockInput.value = currentStock;
+    if (startInput && !startInput.value) {
+        startInput.value = '2010-01-01';
+    }
+    if (endInput && !endInput.value) {
+        endInput.value = new Date().toISOString().split('T')[0];
+    }
+    if (sourceSelect && !sourceSelect.value) {
+        sourceSelect.value = 'akshare';
+    }
+    if (forceFull) forceFull.checked = false;
+    if (scopeSelect && !scopeSelect.value) {
+        scopeSelect.value = 'single';
+    }
+    if (resultBox) {
+        resultBox.classList.add('hidden');
+        resultBox.textContent = '';
+    }
+    if (progressWrap) {
+        progressWrap.classList.add('hidden');
+    }
+    if (progressFill) {
+        progressFill.style.width = '0%';
+    }
+    if (progressText) {
+        progressText.textContent = '准备中...';
+    }
+
+    updateSyncScopeUI();
+    modal.classList.remove('hidden');
+}
+
+function hideDataSyncModal() {
+    document.getElementById('data-sync-modal')?.classList.add('hidden');
+}
+
+function updateSyncScopeUI() {
+    const scope = document.getElementById('sync-scope')?.value || 'single';
+    const stockInput = document.getElementById('sync-stock-code');
+    const stockGroup = stockInput?.closest('.form-group');
+    if (stockGroup) {
+        stockGroup.classList.toggle('hidden', scope !== 'single');
+    }
+}
+
+function updateSyncProgress(completed, total, label = '') {
+    const progressWrap = document.getElementById('sync-progress-wrap');
+    const progressFill = document.getElementById('sync-progress-fill');
+    const progressText = document.getElementById('sync-progress-text');
+    if (!progressWrap || !progressFill || !progressText) return;
+
+    progressWrap.classList.remove('hidden');
+    const percent = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
+    progressFill.style.width = `${percent}%`;
+    progressText.textContent = label || `${completed}/${total}`;
+}
+
+function getSyncThrottleMs(source) {
+    if (source === 'xtdata') return 40;
+    if (source === 'mootdx') return 240;
+    return 260;
+}
+
+function getSyncScopeLabel(scope) {
+    if (scope === 'sh') return '全沪市';
+    if (scope === 'sz') return '全深市';
+    if (scope === 'all') return '全市场';
+    return '单只股票';
+}
+
+function describeSyncRange(startDate, endDate) {
+    if (startDate && endDate) {
+        return `${startDate} ~ ${endDate}`;
+    }
+    if (startDate) {
+        return `${startDate} 起`;
+    }
+    if (endDate) {
+        return `截至 ${endDate}`;
+    }
+    return '默认区间';
+}
+
+async function syncSingleStock(stockCode, source, startDate, endDate, forceFull) {
+    const response = await fetch(`${API_BASE}/data/sync`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            stock_code: stockCode,
+            source,
+            start_date: startDate || null,
+            end_date: endDate || null,
+            force_full: forceFull,
+        }),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+        throw new Error(result.error || '补数失败');
+    }
+    return result;
+}
+
+async function syncOfflineData() {
+    const scope = document.getElementById('sync-scope')?.value || 'single';
+    const stockCode = document.getElementById('sync-stock-code')?.value.trim();
+    const source = document.getElementById('sync-source')?.value || 'akshare';
+    const startDate = document.getElementById('sync-start-date')?.value || '';
+    const endDate = document.getElementById('sync-end-date')?.value || '';
+    const forceFull = !!document.getElementById('sync-force-full')?.checked;
+    const resultBox = document.getElementById('sync-result');
+    const btn = document.getElementById('confirm-sync-btn');
+
+    if (scope === 'single' && !stockCode) {
+        alert('请输入股票代码');
+        return;
+    }
+    if (startDate && endDate && startDate > endDate) {
+        alert('结束日期不能早于开始日期');
+        return;
+    }
+
+    if (btn) btn.disabled = true;
+    if (resultBox) {
+        resultBox.classList.remove('hidden');
+        resultBox.textContent = scope === 'single'
+            ? `正在按区间 ${describeSyncRange(startDate, endDate)} 同步离线数据，请稍候...`
+            : `正在准备批量补数列表（区间 ${describeSyncRange(startDate, endDate)}）...`;
+    }
+
+    try {
+        if (scope === 'single') {
+            updateSyncProgress(0, 1, '正在同步 1/1');
+            const result = await syncSingleStock(stockCode, source, startDate, endDate, forceFull);
+            updateSyncProgress(1, 1, '已完成 1/1');
+            if (resultBox) {
+                resultBox.classList.remove('hidden');
+                const beforeRange = result.range_before ? `${result.range_before.start} ~ ${result.range_before.end}` : '无本地数据';
+                const afterRange = result.range_after ? `${result.range_after.start} ~ ${result.range_after.end}` : '无数据';
+                const plannedRangeText = Array.isArray(result.planned_ranges) && result.planned_ranges.length > 0
+                    ? ` 计划补齐 ${result.planned_ranges.map(item => `${item.start} ~ ${item.end}`).join('；')}。`
+                    : '';
+                const fetchedRangeText = Array.isArray(result.fetched_ranges) && result.fetched_ranges.length > 0
+                    ? ` 实际抓取 ${result.fetched_ranges.map(item => `${item.start} ~ ${item.end}`).join('；')}。`
+                    : '';
+                const missingRangeText = Array.isArray(result.missing_ranges) && result.missing_ranges.length > 0
+                    ? ` 在线源未返回 ${result.missing_ranges.map(item => `${item.start} ~ ${item.end}`).join('；')}。`
+                    : '';
+                const fileStateText = result.local_file_changed === false ? ' 本地文件未改动。' : '';
+                resultBox.textContent = `完成: ${result.message} 请求区间 ${describeSyncRange(startDate, endDate)}，本地范围 ${beforeRange} -> ${afterRange}，新增 ${result.added_rows || 0} 条，抓取 ${result.fetched_rows || 0} 条。${plannedRangeText}${fetchedRangeText}${missingRangeText}${fileStateText}`;
+            }
+        } else {
+            const universeResponse = await fetch(`${API_BASE}/data/stock_universe?market=${scope}`);
+            const universePayload = await universeResponse.json();
+            if (!universeResponse.ok) {
+                throw new Error(universePayload.error || '获取股票列表失败');
+            }
+
+            const stockCodes = universePayload.stock_codes || [];
+            if (stockCodes.length === 0) {
+                throw new Error('当前市场没有可补数的股票列表');
+            }
+
+            let successCount = 0;
+            let failureCount = 0;
+            let addedRows = 0;
+            let latestSuccessCode = '';
+            const throttleMs = getSyncThrottleMs(source);
+
+            for (let index = 0; index < stockCodes.length; index += 1) {
+                const code = stockCodes[index];
+                updateSyncProgress(index, stockCodes.length, `正在补数 ${index + 1}/${stockCodes.length}：${code}`);
+                try {
+                    const result = await syncSingleStock(code, source, startDate, endDate, forceFull);
+                    successCount += 1;
+                    addedRows += result.added_rows || 0;
+                    latestSuccessCode = code;
+                } catch (error) {
+                    failureCount += 1;
+                    console.error(`批量补数失败 ${code}:`, error);
+                }
+
+                if (index < stockCodes.length - 1) {
+                    await sleep(throttleMs);
+                }
+            }
+
+            updateSyncProgress(stockCodes.length, stockCodes.length, `批量补数完成 ${stockCodes.length}/${stockCodes.length}`);
+            if (resultBox) {
+                resultBox.classList.remove('hidden');
+                resultBox.textContent = `完成: ${getSyncScopeLabel(scope)}区间 ${describeSyncRange(startDate, endDate)}，共 ${stockCodes.length} 只，成功 ${successCount}，失败 ${failureCount}，累计新增 ${addedRows} 条。${latestSuccessCode ? ` 最近成功股票 ${latestSuccessCode}。` : ''}`;
+            }
+        }
+    } catch (error) {
+        console.error('离线数据补充失败:', error);
+        if (resultBox) {
+            resultBox.classList.remove('hidden');
+            resultBox.textContent = `失败: ${error.message || '未知错误'}`;
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+    }
 }
 
 function showSettings() {
@@ -744,18 +1390,26 @@ function renderMaPeriodsEditor() {
     maPeriods.forEach((p, index) => {
         const tag = document.createElement('div');
         tag.className = 'ma-period-tag';
-        tag.style.cssText = 'background:#f3f4f6; border:1px solid #d1d5db; border-radius:4px; padding:2px 8px; display:flex; align-items:center; font-size:12px;';
-        tag.innerHTML = `
-            <span style="margin-right:8px; font-weight:bold;">${p}</span>
-            <span class="delete-ma" data-index="${index}" style="cursor:pointer; color:#ef4444; font-weight:bold;">×</span>
-        `;
+        const value = document.createElement('span');
+        value.className = 'ma-period-value';
+        value.textContent = `MA${p}`;
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'ma-period-remove delete-ma';
+        removeBtn.dataset.index = String(index);
+        removeBtn.setAttribute('aria-label', `删除 MA${p}`);
+        removeBtn.textContent = 'x';
+
+        tag.appendChild(value);
+        tag.appendChild(removeBtn);
         container.appendChild(tag);
     });
 
     if (maPeriods.length < 6) {
         const addBtn = document.createElement('button');
         addBtn.className = 'btn-add-ma';
-        addBtn.style.cssText = 'background:#e5e7eb; border:none; border-radius:4px; width:24px; height:24px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-weight:bold;';
+        addBtn.type = 'button';
         addBtn.textContent = '+';
         addBtn.onclick = () => {
             const val = prompt('输入新的均线周期 (如: 60):');
@@ -796,15 +1450,11 @@ async function loadUserSettings() {
         document.getElementById('commission-rate').value = (settings.commission_rate * 10000).toFixed(1);
         document.getElementById('min-commission').value = settings.min_commission;
         document.getElementById('stamp-tax-rate').value = (settings.stamp_tax_rate * 1000).toFixed(1);
-
-        // 加载复权方式设置
-        if (settings.adjustment_mode) {
-            document.getElementById('adjustment-mode').value = settings.adjustment_mode;
-            // 同时更新左侧面板的复权设置
-            const adjustmentRadio = document.querySelector(`input[name="adjustment"][value="${settings.adjustment_mode}"]`);
-            if (adjustmentRadio) {
-                adjustmentRadio.checked = true;
-            }
+        document.getElementById('theme-select').value = settings.theme || currentTheme;
+        document.getElementById('adjustment-mode').value = 'forward';
+        const adjustmentRadio = document.querySelector('input[name="adjustment"][value="forward"]');
+        if (adjustmentRadio) {
+            adjustmentRadio.checked = true;
         }
 
         // 加载 AI API 设置
@@ -879,7 +1529,8 @@ async function saveSettings() {
             commission_rate: parseFloat(document.getElementById('commission-rate').value) / 10000,
             min_commission: parseFloat(document.getElementById('min-commission').value),
             stamp_tax_rate: parseFloat(document.getElementById('stamp-tax-rate').value) / 1000,
-            adjustment_mode: document.getElementById('adjustment-mode').value,
+            adjustment_mode: 'forward',
+            theme: document.getElementById('theme-select').value,
             enable_ai_api: document.getElementById('enable-ai-api').checked,
             ma_periods: maPeriods,
             indicators: indicators
@@ -894,14 +1545,14 @@ async function saveSettings() {
         });
 
         if (response.ok) {
-            // 同时更新左侧面板的复权设置
-            const adjustmentRadio = document.querySelector(`input[name="adjustment"][value="${settings.adjustment_mode}"]`);
+            const adjustmentRadio = document.querySelector('input[name="adjustment"][value="forward"]');
             if (adjustmentRadio) {
                 adjustmentRadio.checked = true;
             }
 
             // 更新 AI 接口信息
             updateAIApiStatus(settings.enable_ai_api, currentUser);
+            applyTheme(settings.theme, true, false);
 
             hideSettings();
             alert('设置保存成功');
@@ -926,22 +1577,138 @@ function switchTab(tabName) {
     });
 }
 
+function replaceRenderedKlineData(klineData) {
+    latestRenderedKlineData = Array.isArray(klineData) ? klineData.map(item => ({ ...item })) : [];
+}
+
+function upsertRenderedBar(bar) {
+    if (!bar) return;
+    if (latestRenderedKlineData.length === 0) {
+        latestRenderedKlineData = [{ ...bar }];
+        return;
+    }
+
+    const lastBar = latestRenderedKlineData[latestRenderedKlineData.length - 1];
+    if (lastBar.time === bar.time) {
+        latestRenderedKlineData[latestRenderedKlineData.length - 1] = { ...bar };
+        return;
+    }
+
+    latestRenderedKlineData.push({ ...bar });
+}
+
+function shiftLogicalRange(range, delta = 1) {
+    if (!range) return null;
+    return {
+        from: range.from + delta,
+        to: range.to + delta
+    };
+}
+
+function setVisibleRangeAll(range) {
+    if (!range) return;
+    chart?.timeScale().setVisibleLogicalRange(range);
+    volumeChart?.timeScale().setVisibleLogicalRange(range);
+    indicatorChart?.timeScale().setVisibleLogicalRange(range);
+}
+
+function applyTrainingSnapshot(data, options = {}) {
+    const { fitContent = false } = options;
+    if (!data.kline_data || data.kline_data.length === 0) {
+        throw new Error('训练数据为空');
+    }
+
+    if (currentTraining) {
+        currentTraining.latestProgress = data.progress || null;
+        currentTraining.tradeMarkers = data.trade_markers || [];
+    }
+
+    candlestickSeries.setData(data.kline_data);
+    volumeSeries.setData(data.volume_data || []);
+    replaceRenderedKlineData(data.kline_data);
+
+    if (data.ma_data) {
+        maPeriods.forEach(p => {
+            if (maSeries[p]) {
+                maSeries[p].setData(data.ma_data[p] || []);
+            }
+        });
+    }
+
+    const currentBar = data.kline_data[data.kline_data.length - 1];
+    updateCurrentInfo(currentBar, data.progress);
+    updateTradeMarkers(data.trade_markers || []);
+
+    if (fitContent) {
+        chart.timeScale().fitContent();
+    }
+}
+
+async function refreshTrainingView(options = {}) {
+    if (!currentTraining || !currentTraining.id) return;
+    const { preserveRange = true, fitContent = false } = options;
+    const visibleRange = preserveRange && chart ? chart.timeScale().getVisibleLogicalRange() : null;
+    const maQuery = maPeriods.join(',');
+    const dataEndpoint = isViewOnlyMode ? 'full_data' : 'data';
+    const response = await fetch(`${API_BASE}/training/${currentTraining.id}/${dataEndpoint}?ma_periods=${maQuery}&${getViewPeriodQuery()}`);
+    if (!response.ok) {
+        throw new Error(`刷新训练视图失败: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (data.stock_name) {
+        document.getElementById('stock-name').textContent = data.stock_name;
+    }
+    applyTrainingSnapshot(data, { fitContent });
+    await loadTechnicalIndicator(currentIndicatorType);
+    if (visibleRange !== null) {
+        setVisibleRangeAll(visibleRange);
+    }
+    await updateChipDistribution();
+}
+
+async function switchViewPeriod(period) {
+    const nextPeriod = period === 'weekly' ? 'weekly' : 'daily';
+    if (currentPeriod === nextPeriod) {
+        updatePeriodBadge(nextPeriod);
+        return;
+    }
+
+    updatePeriodBadge(nextPeriod);
+    if (!currentTraining || !currentTraining.id || !chart) {
+        return;
+    }
+
+    showLoading(nextPeriod === 'weekly' ? '正在切换周K视图' : '正在切换日K视图');
+    try {
+        await refreshTrainingView({ preserveRange: false, fitContent: true });
+    } catch (error) {
+        console.error('切换K线视图失败:', error);
+        alert('切换K线视图失败');
+    } finally {
+        hideLoading();
+    }
+}
+
 // 训练管理
 async function startTraining() {
     const isRandomMode = document.querySelector('.tab-btn.active').dataset.tab === 'random';
     const initialCapital = parseFloat(document.getElementById('initial-capital').value);
     const dataSource = document.getElementById('data-source').value || 'akshare';
+    const period = 'daily';
 
     let trainingConfig = {
         user: currentUser,
         initial_capital: initialCapital,
         mode: isRandomMode ? 'random' : 'specified',
-        data_source: dataSource
+        data_source: dataSource,
+        period: period
     };
 
     if (isRandomMode) {
         trainingConfig.sector = document.getElementById('sector-filter').value;
-        trainingConfig.year_range = document.getElementById('year-range').value;
+        trainingConfig.date_start = document.getElementById('random-start-date').value.trim();
+        trainingConfig.date_end = document.getElementById('random-end-date').value.trim();
     } else {
         const stockCode = document.getElementById('stock-code').value.trim();
         const startDate = document.getElementById('start-date').value;
@@ -956,6 +1723,11 @@ async function startTraining() {
     }
 
     try {
+        updatePeriodBadge('daily');
+        showLoading(
+            dataSource === 'offline' ? '正在筛选本地离线数据' : '正在创建训练',
+            dataSource === 'offline' ? '首次校验离线股票可用范围时会稍慢一些。' : '正在准备图表和训练数据...'
+        );
         const response = await fetch(`${API_BASE}/training/start`, {
             method: 'POST',
             headers: {
@@ -966,7 +1738,10 @@ async function startTraining() {
 
         if (response.ok) {
             currentTraining = await response.json();
+            currentTraining.period = 'daily';
+            currentReportData = null;
             hideTrainingSetup();
+            document.getElementById('report-interface').classList.add('hidden');
             showTrainingInterface();
             initializeChart();
             await loadInitialData();
@@ -981,16 +1756,19 @@ async function startTraining() {
             startAutoSync();
         } else {
             const error = await response.json();
-            alert(error.message || '开始训练失败');
+            alert(error.error || error.message || '开始训练失败');
         }
     } catch (error) {
         console.error('开始训练失败:', error);
         alert('开始训练失败');
+    } finally {
+        hideLoading();
     }
 }
 
 function showTrainingInterface() {
     document.getElementById('training-interface').classList.remove('hidden');
+    setTrainingViewOnlyMode(false, { showBackToReport: false });
     updateAccountInfo();
     // 隐藏按钮和标题
     toggleToolbarForTraining(true);
@@ -998,6 +1776,7 @@ function showTrainingInterface() {
 
 // 图表管理
 function initializeChart() {
+    const palette = getThemePalette();
     // 初始化主图表
     const chartContainer = document.getElementById('chart');
     chartContainer.innerHTML = '';
@@ -1017,22 +1796,22 @@ function initializeChart() {
         width: chartContainer.clientWidth,
         height: chartContainer.clientHeight,
         layout: {
-            backgroundColor: '#ffffff',
-            textColor: '#333',
+            background: { type: 'solid', color: palette.chartBg },
+            textColor: palette.text,
         },
         grid: {
             vertLines: {
-                color: '#f0f0f0',
+                color: palette.grid,
             },
             horzLines: {
-                color: '#f0f0f0',
+                color: palette.grid,
             },
         },
         crosshair: {
             mode: LightweightCharts.CrosshairMode.Normal,
         },
         rightPriceScale: {
-            borderColor: '#e9ecef',
+            borderColor: palette.border,
             minimumWidth: 80,
         },
         // 使用 localization 选项来格式化十字标线的时间
@@ -1052,7 +1831,7 @@ function initializeChart() {
             locale: 'zh-CN',
         },
         timeScale: {
-            borderColor: '#e9ecef',
+            borderColor: palette.border,
             timeVisible: true,
             secondsVisible: false,
             tickMarkFormatter: (time) => {
@@ -1065,11 +1844,11 @@ function initializeChart() {
     // 添加K线系列
     candlestickSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
         upColor: 'rgba(255, 77, 79, 0)',
-        downColor: '#008000',
-        borderUpColor: '#ff4d4f',
-        borderDownColor: '#008000',
-        wickUpColor: '#ff4d4f',
-        wickDownColor: '#008000',
+        downColor: palette.negative,
+        borderUpColor: palette.positive,
+        borderDownColor: palette.negative,
+        wickUpColor: palette.positive,
+        wickDownColor: palette.negative,
         borderVisible: true,
     });
     candlestickSeries.applyOptions({ lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false });
@@ -1106,23 +1885,23 @@ function initializeChart() {
         width: volumeContainer.clientWidth,
         height: volumeContainer.clientHeight,
         layout: {
-            backgroundColor: '#ffffff',
-            textColor: '#333',
+            background: { type: 'solid', color: palette.chartBg },
+            textColor: palette.text,
         },
         grid: {
             vertLines: {
-                color: '#f0f0f0',
+                color: palette.grid,
             },
             horzLines: {
-                color: '#f0f0f0',
+                color: palette.grid,
             },
         },
         rightPriceScale: {
-            borderColor: '#e9ecef',
+            borderColor: palette.border,
             minimumWidth: 80,
         },
         timeScale: {
-            borderColor: '#e9ecef',
+            borderColor: palette.border,
             visible: false,
             tickMarkFormatter: (time) => {
                 const date = new Date(time * 1000);
@@ -1142,7 +1921,7 @@ function initializeChart() {
     });
 
     // 初始化技术指标图表
-    const indicatorContainer = document.getElementById('indicator-chart');
+    const indicatorContainer = document.getElementById('indicator-canvas');
     indicatorContainer.innerHTML = '';
 
     // 在图表容器内动态创建信息显示框
@@ -1160,23 +1939,23 @@ function initializeChart() {
         width: indicatorContainer.clientWidth,
         height: indicatorContainer.clientHeight,
         layout: {
-            backgroundColor: '#ffffff',
-            textColor: '#333',
+            background: { type: 'solid', color: palette.chartBg },
+            textColor: palette.text,
         },
         grid: {
             vertLines: {
-                color: '#f0f0f0',
+                color: palette.grid,
             },
             horzLines: {
-                color: '#f0f0f0',
+                color: palette.grid,
             },
         },
         rightPriceScale: {
-            borderColor: '#e9ecef',
+            borderColor: palette.border,
             minimumWidth: 80,
         },
         timeScale: {
-            borderColor: '#e9ecef',
+            borderColor: palette.border,
             visible: false,
             tickMarkFormatter: (time) => {
                 const date = new Date(time * 1000);
@@ -1191,11 +1970,11 @@ function initializeChart() {
             volumeChart.timeScale().setVisibleLogicalRange(timeRange);
             indicatorChart.timeScale().setVisibleLogicalRange(timeRange);
         }
-        renderChipDistribution();
+        scheduleChipDistributionRender();
     });
     
     chart.timeScale().subscribeVisibleTimeRangeChange(() => {
-        renderChipDistribution();
+        scheduleChipDistributionRender();
     });
 
     // 监听成交量图表的时间轴变化
@@ -1246,7 +2025,7 @@ function initializeChart() {
         infoEl.style.display = 'block';
 
         // 创建数据Map以便快速查找
-        const seriesData = candlestickSeries.data();
+        const seriesData = latestRenderedKlineData;
         const dataMap = new Map();
         seriesData.forEach((dataPoint, index) => {
             // 确保数据点有时间属性
@@ -1455,7 +2234,7 @@ async function loadInitialData() {
     // 内部函数，用于执行实际的数据加载尝试
     const attemptToLoad = async () => {
         const maQuery = maPeriods.join(',');
-        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/data?ma_periods=${maQuery}`);
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/data?ma_periods=${maQuery}&${getViewPeriodQuery()}`);
         if (!response.ok) {
             // 如果响应不成功，直接抛出错误，由外部的catch块处理
             throw new Error(`Server responded with status: ${response.status}`);
@@ -1464,31 +2243,7 @@ async function loadInitialData() {
 
         // 更新股票信息
         document.getElementById('stock-name').textContent = data.stock_name || '未知股票';
-
-        // 加载初始K线数据
-        if (data.kline_data && data.kline_data.length > 0) {
-            candlestickSeries.setData(data.kline_data);
-            volumeSeries.setData(data.volume_data);
-
-            // 加载移动平均线数据
-            if (data.ma_data) {
-                maPeriods.forEach(p => {
-                    if (maSeries[p] && data.ma_data[p]) {
-                        maSeries[p].setData(data.ma_data[p]);
-                    }
-                });
-            }
-
-            // 更新当前日期和价格信息
-            const currentBar = data.kline_data[data.kline_data.length - 1];
-            updateCurrentInfo(currentBar, data.progress);
-
-            // 加载交易标记
-            updateTradeMarkers(data.trade_markers || []);
-        } else {
-            // 如果没有K线数据，也视为一种失败
-            throw new Error("Initial data received, but kline_data is empty.");
-        }
+        applyTrainingSnapshot(data);
 
         // 加载技术指标
         await loadTechnicalIndicator(currentIndicatorType);
@@ -1537,6 +2292,7 @@ async function loadInitialData() {
 
 function updateCurrentInfo(barData, progress) {
     if (!barData) return;
+    const palette = getThemePalette();
 
     const date = new Date(barData.time * 1000);
     const formattedDate = `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
@@ -1572,7 +2328,7 @@ function updateCurrentInfo(barData, progress) {
         let prevClose = barData.lastClose;
         if (prevClose === undefined) {
             // 如果后端没有传lastClose，则尝试从本地的K线图表获取最后第二根数据的收盘价
-            const localData = candlestickSeries.data();
+            const localData = latestRenderedKlineData;
             if (localData && localData.length >= 2) {
                 prevClose = localData[localData.length - 2].close;
             }
@@ -1581,14 +2337,14 @@ function updateCurrentInfo(barData, progress) {
         if (prevClose !== undefined && prevClose > 0) {
             const changePercent = ((barData.close - prevClose) / prevClose * 100).toFixed(2);
             document.getElementById('change-percent').textContent = `${changePercent}%`;
-            document.getElementById('change-percent').style.color = changePercent > 0 ? '#ff4d4f' : changePercent < 0 ? '#008000' : '#000000';
+            document.getElementById('change-percent').style.color = changePercent > 0 ? palette.positive : changePercent < 0 ? palette.negative : palette.neutral;
         } else {
             document.getElementById('change-percent').textContent = `--%`;
-            document.getElementById('change-percent').style.color = '#000000';
+            document.getElementById('change-percent').style.color = palette.neutral;
         }
     } else {
         document.getElementById('change-percent').textContent = `--%`;
-        document.getElementById('change-percent').style.color = '#000000';
+        document.getElementById('change-percent').style.color = palette.neutral;
     }
 
     // 更新进度信息
@@ -1616,7 +2372,7 @@ function updateTradeMarkers(markers) {
     if (!tradeMarkerSeries || !markers) return;
 
     // 1. 获取所有K线数据并构建一个以时间为键的Map，方便快速查找
-    const allCandlestickData = candlestickSeries.data();
+    const allCandlestickData = latestRenderedKlineData;
     const candlestickMap = new Map();
     allCandlestickData.forEach(data => {
         candlestickMap.set(data.time, data);
@@ -1696,6 +2452,7 @@ function updatePlaybackSpeed() {
 
 async function nextBar() {
     try {
+        const previousLogicalRange = chart?.timeScale().getVisibleLogicalRange();
         const response = await fetch(`${API_BASE}/training/${currentTraining.id}/next`, {
             method: 'POST'
         });
@@ -1707,51 +2464,61 @@ async function nextBar() {
                 // 训练结束
                 pausePlayback();
                 showReport(data.report);
+                return false;
             } else {
                 // 更新图表数据
                 if (data.new_bar) {
-                    candlestickSeries.update(data.new_bar);
-                    
-                    if (data.requires_full_refresh) {
-                        await updateAdjustment();
+                    if (currentPeriod === 'weekly') {
+                        await refreshTrainingView({ preserveRange: true });
+                    } else {
+                        candlestickSeries.update(data.new_bar);
+                        upsertRenderedBar(data.new_bar);
+
+                        if (data.requires_full_refresh) {
+                            await updateAdjustment(shiftLogicalRange(previousLogicalRange, 1));
+                        } else {
+                            if (data.new_volume) {
+                                volumeSeries.update(data.new_volume);
+                            }
+
+                            updateCurrentInfo(data.new_bar, data.progress);
+                            if (currentTraining) {
+                                currentTraining.latestProgress = data.progress || null;
+                            }
+
+                            if (data.progress && data.progress.current_bar_id !== undefined) {
+                                lastKnownBarId = data.progress.current_bar_id;
+                            }
+
+                            await updateMovingAverages();
+                            await loadTechnicalIndicator(currentIndicatorType);
+                            setVisibleRangeAll(shiftLogicalRange(previousLogicalRange, 1));
+                            await updateChipDistribution();
+                        }
                     }
 
-                    // 更新成交量数据，支持颜色
-                    if (data.new_volume) {
-                        volumeSeries.update(data.new_volume);
-                    }
-
-                    updateCurrentInfo(data.new_bar, data.progress);
-                    
-                    // 防止自动同步机制触发多余的全量刷新
                     if (data.progress && data.progress.current_bar_id !== undefined) {
                         lastKnownBarId = data.progress.current_bar_id;
                     }
-
-                    // 更新筹码分布
-                    updateChipDistribution();
-
-                    // 更新移动平均线
-                    await updateMovingAverages();
-
-                    // 更新技术指标
-                    await loadTechnicalIndicator(currentIndicatorType);
                 }
 
                 updateAccountInfo();
+                return true;
             }
         } else {
             const error = await response.json();
             console.error('获取下一根K线失败:', error);
+            return false;
         }
     } catch (error) {
         console.error('获取下一根K线失败:', error);
+        return false;
     }
 }
 
 async function updateMovingAverages() {
     try {
-        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/data`);
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/data?${getViewPeriodQuery()}`);
         const data = await response.json();
 
         if (data.ma_data) {
@@ -1773,6 +2540,7 @@ async function loadTechnicalIndicator(indicatorType) {
     try {
         // 获取DOM元素，并检查是否存在
         const indicatorChartElement = document.getElementById('indicator-chart');
+        const indicatorCanvasElement = document.getElementById('indicator-canvas');
         const indicatorHeaderElement = document.getElementById('indicator-header');
 
         // 如果之前显示的是BOLL，先移除主图上的BOLL线
@@ -1797,8 +2565,11 @@ async function loadTechnicalIndicator(indicatorType) {
             currentIndicatorSeries = []; // 清空数组
         }
 
+        if (indicatorCanvasElement) {
+            indicatorCanvasElement.style.display = (indicatorType === 'BOLL') ? 'none' : 'block';
+        }
         if (indicatorChartElement) {
-            indicatorChartElement.style.display = (indicatorType === 'BOLL') ? 'none' : 'block';
+            indicatorChartElement.classList.toggle('indicator-collapsed', indicatorType === 'BOLL');
         }
         if (indicatorHeaderElement) {
             indicatorHeaderElement.style.display = 'block'; // 确保选择器总是可见
@@ -1806,7 +2577,7 @@ async function loadTechnicalIndicator(indicatorType) {
 
         // 如果选择的是BOLL，则直接在主图上绘制并返回
         if (indicatorType === 'BOLL') {
-            const response = await fetch(`${API_BASE}/training/${currentTraining.id}/indicators/BOLL`);
+            const response = await fetch(`${API_BASE}/training/${currentTraining.id}/indicators/BOLL?${getViewPeriodQuery()}`);
             const data = await response.json();
             if (data.type === 'BOLL' && data.data) {
                 const upperData = data.data.map(item => ({ time: item.time, value: item.upper }));
@@ -1843,7 +2614,7 @@ async function loadTechnicalIndicator(indicatorType) {
             }
         } else {
             // --- 如果不是BOLL，则按原逻辑在下方图表绘制 ---
-            const response = await fetch(`${API_BASE}/training/${currentTraining.id}/indicators/${indicatorType}`);
+            const response = await fetch(`${API_BASE}/training/${currentTraining.id}/indicators/${indicatorType}?${getViewPeriodQuery()}`);
             const data = await response.json();
 
             // 根据指标类型创建新的系列 (此部分代码保持不变)
@@ -1954,14 +2725,15 @@ function changeIndicator() {
 }
 
 // 复权设置
-async function updateAdjustment() {
-    const adjustment = document.querySelector('input[name="adjustment"]:checked').value;
+async function updateAdjustment(targetRange = null) {
+    const checkedAdjustment = document.querySelector('input[name="adjustment"]:checked');
+    const adjustment = checkedAdjustment ? checkedAdjustment.value : 'forward';
 
     const maQuery = maPeriods.join(',');
     try {
-        const visibleRange = chart.timeScale().getVisibleLogicalRange();
+        const visibleRange = targetRange || chart.timeScale().getVisibleLogicalRange();
         
-        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/adjustment?ma_periods=${maQuery}`, {
+        const response = await fetch(`${API_BASE}/training/${currentTraining.id}/adjustment?ma_periods=${maQuery}&${getViewPeriodQuery()}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1971,29 +2743,18 @@ async function updateAdjustment() {
 
         if (response.ok) {
             const data = await response.json();
-            // 重新加载图表数据
-            candlestickSeries.setData(data.kline_data);
-
-            // 重新加载成交量数据，支持颜色
-            if (data.volume_data) {
-                volumeSeries.setData(data.volume_data);
-            }
-
-            // 重新加载移动平均线
-            if (data.ma_data) {
-                maPeriods.forEach(p => {
-                    if (maSeries[p]) {
-                        maSeries[p].setData(data.ma_data[p] || []);
-                    }
-                });
-            }
+            applyTrainingSnapshot({
+                ...data,
+                progress: currentTraining?.latestProgress || null,
+                trade_markers: currentPeriod === 'daily' ? (currentTraining?.tradeMarkers || []) : []
+            });
             renderChartLegend();
             
             if (visibleRange !== null) {
-                chart.timeScale().setVisibleLogicalRange(visibleRange);
+                setVisibleRangeAll(visibleRange);
             }
             
-            updateChipDistribution();
+            await updateChipDistribution();
         }
     } catch (error) {
         console.error('更新复权设置失败:', error);
@@ -2013,7 +2774,14 @@ function limitTradeQuantity() {
     }
 }
 
-async function executeBuy() {
+async function executeBuy(priceType = 'close') {
+    if (priceType === 'open') {
+        const hasNext = await nextBar();
+        if (!hasNext) {
+            return; // 训练结束或出错
+        }
+    }
+
     const quantity = parseInt(document.getElementById('trade-quantity').value);
     if (!quantity || quantity <= 0) {
         alert('请输入有效的交易数量');
@@ -2028,7 +2796,8 @@ async function executeBuy() {
             },
             body: JSON.stringify({
                 action: 'buy',
-                quantity: quantity
+                quantity: quantity,
+                price_type: priceType
             })
         });
 
@@ -2050,7 +2819,14 @@ async function executeBuy() {
     }
 }
 
-async function executeSell() {
+async function executeSell(priceType = 'close') {
+    if (priceType === 'open') {
+        const hasNext = await nextBar();
+        if (!hasNext) {
+            return; // 训练结束或出错
+        }
+    }
+
     const quantity = parseInt(document.getElementById('trade-quantity').value);
     if (!quantity || quantity <= 0) {
         alert('请输入有效的交易数量');
@@ -2065,7 +2841,8 @@ async function executeSell() {
             },
             body: JSON.stringify({
                 action: 'sell',
-                quantity: quantity
+                quantity: quantity,
+                price_type: priceType
             })
         });
 
@@ -2600,9 +3377,6 @@ async function requestAIAnalysis() {
     }
 }
 
-// 内部变量用于存储当前报告数据
-let currentReportData = null;
-
 /**
  * 主函数：显示完整的报告界面
  * @param {object} report - 包含所有报告数据的对象
@@ -2610,6 +3384,7 @@ let currentReportData = null;
 function showReport(report) {
     // 保存当前报告数据供 AI 分析使用
     currentReportData = report;
+    setTrainingViewOnlyMode(false, { showBackToReport: false });
     
     // 切换界面可见性
     document.getElementById('training-interface').classList.add('hidden');
@@ -2673,10 +3448,13 @@ async function viewFullChart() {
     
     // Use session_id from report data if available, otherwise from currentTraining
     const trainingId = currentReportData ? currentReportData.session_id : currentTraining.id;
+    if (!currentTraining) {
+        currentTraining = { id: trainingId, latestProgress: null, tradeMarkers: [] };
+    }
 
     const maQuery = maPeriods.join(',');
     try {
-        const response = await fetch(`${API_BASE}/training/${trainingId}/full_data?ma_periods=${maQuery}`);
+        const response = await fetch(`${API_BASE}/training/${trainingId}/full_data?ma_periods=${maQuery}&${getViewPeriodQuery()}`);
         if (!response.ok) {
             throw new Error('获取完整数据失败');
         }
@@ -2686,87 +3464,27 @@ async function viewFullChart() {
         // Hide report interface and show training interface
         document.getElementById('report-interface').classList.add('hidden');
         document.getElementById('training-interface').classList.remove('hidden');
-        
-        // Set view-only mode visually
-        document.querySelectorAll('.trade-controls button').forEach(btn => {
-            btn.disabled = true;
-            btn.style.opacity = '0.5';
-            btn.style.cursor = 'not-allowed';
-        });
-        
-        const endBtn = document.getElementById('end-training-btn');
-        if (endBtn) {
-            endBtn.disabled = true;
-            endBtn.style.opacity = '0.5';
-        }
-
-        const nextBarBtn = document.getElementById('next-bar-btn');
-        if (nextBarBtn) {
-            nextBarBtn.disabled = true;
-            nextBarBtn.style.opacity = '0.5';
-        }
-        
-        const playPauseBtn = document.getElementById('play-pause-btn');
-        if (playPauseBtn) {
-            playPauseBtn.disabled = true;
-            playPauseBtn.style.opacity = '0.5';
-        }
+        toggleToolbarForTraining(true);
         
         // Update chart data
         if (data.kline_data && data.kline_data.length > 0) {
-            candlestickSeries.setData(data.kline_data);
-            volumeSeries.setData(data.volume_data);
-
-            if (data.ma_data) {
-                maPeriods.forEach(p => {
-                    if (maSeries[p]) {
-                        maSeries[p].setData(data.ma_data[p] || []);
-                    }
-                });
-            }
-            
-            updateTradeMarkers(data.trade_markers || []);
+            applyTrainingSnapshot(data);
             
             // Re-load technical indicators for full range
             await loadTechnicalIndicator(currentIndicatorType);
+            await updateChipDistribution();
             
             // Adjust time scale to fit all data
             chart.timeScale().fitContent();
         }
         
-        // Disable global shortcuts for view-only mode
-        isViewOnlyMode = true;
-        
-        // Add a back to report button if it doesn't exist
-        let backBtn = document.getElementById('back-to-report-btn');
-        if (!backBtn) {
-            backBtn = document.createElement('button');
-            backBtn.id = 'back-to-report-btn';
-            backBtn.className = 'btn btn-primary';
-            backBtn.style.width = '100%';
-            backBtn.style.marginTop = '10px';
-            backBtn.textContent = '返回复盘报告';
-            backBtn.onclick = () => {
-                document.getElementById('training-interface').classList.add('hidden');
-                document.getElementById('report-interface').classList.remove('hidden');
-            };
-            
-            // Add it to the training controls section
-            const controlsSection = document.querySelector('.training-controls');
-            if (controlsSection) {
-                controlsSection.appendChild(backBtn);
-            }
-        }
-        backBtn.classList.remove('hidden');
+        setTrainingViewOnlyMode(true, { showBackToReport: true });
         
     } catch (error) {
         console.error('查看完整走势失败:', error);
         alert('获取完整走势数据失败');
     }
 }
-
-// 内部变量用于跟踪是否为只读模式
-let isViewOnlyMode = false;
 
 // 工具函数
 function formatNumber(num) {

@@ -46,9 +46,11 @@ class UserManagerEnhanced:
                     'commission_rate': 0.0003,  # 万分之3
                     'min_commission': 5.0,      # 最低5元
                     'stamp_tax_rate': 0.001,    # 千分之1
-                    'adjustment_mode': 'dynamic_forward',  # 默认复权方式为动态前复权
+                    'adjustment_mode': 'forward',  # 默认使用稳定前复权
                     'default_initial_capital': 100000, # 默认初始资金
-                    'ma_periods': [5, 10, 20] # 默认MA周期
+                    'ma_periods': [5, 10, 20], # 默认MA周期
+                    'theme': 'light',
+                    'default_period': 'daily'
                 },
                 'preferences': {
                     # 'default_capital': 100000,
@@ -160,4 +162,3 @@ class UserManagerEnhanced:
     def export_training_data(self, username: str, session_id: str, format: str = 'json') -> Optional[str]:
         """导出训练数据"""
         return self.history_manager.export_session_data(username, session_id, format)
-

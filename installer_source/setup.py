@@ -204,7 +204,7 @@ def main_install():
         create_shortcut(target_exe, shortcut_file)
         
         # AI 策略测试器快捷方式
-        ai_tester_exe = os.path.join(bin_path, "KLineTrainer_AI策略测试器.exe")
+        ai_tester_exe = os.path.join(bin_path, "KLineTrainer_AI_Assistant.exe")
         if os.path.exists(ai_tester_exe):
             ai_shortcut_file = os.path.join(desktop_path, f"{APP_NAME}_AI_Assistant.lnk")
             create_shortcut(ai_tester_exe, ai_shortcut_file)
